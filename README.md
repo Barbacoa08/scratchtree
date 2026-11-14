@@ -4,6 +4,8 @@ Scratchtree is a local-first Mac notes app for developers. Capture a thought wit
 
 Scratchtree is an independent, developer-focused Markdown notes app, inspired by Stashpad Lists. This is an early alpha for Apple Silicon Macs. The current source adds private, existing-account Dexie Cloud synchronization while keeping notes available locally. Public sign-up is not available. The published download below remains the earlier local-only alpha.5.
 
+Website and downloads: [scratchtree.barbajoe.tech](https://scratchtree.barbajoe.tech).
+
 ![Editor overview with synthetic developer notes](docs/media/workspace-overview.png)
 
 _Current source preview with synthetic notes; see the download compatibility note below._
