@@ -245,12 +245,45 @@ describe('public Dexie login flow', () => {
       open: true,
       join: { localNotes: 2, cloudNotes: 3 },
     });
+    f.auth.dismiss();
+    expect(f.auth.state.open).toBe(false);
+    f.auth.showSignIn();
+    expect(f.auth.state).toMatchObject({
+      open: true,
+      phase: 'syncing',
+      join: { localNotes: 2, cloudNotes: 3 },
+    });
     await f.auth.acceptCloud();
     expect(f.auth.state).toMatchObject({
       phase: 'signed-in',
       open: false,
       join: null,
     });
+  });
+
+  it('keeps an uninterruptible initial adoption open until the join or error is available', async () => {
+    const f = setup();
+    let release!: () => void;
+    f.host.finishSignIn = () =>
+      new Promise((resolve) => {
+        release = () => resolve(null);
+      });
+    f.auth.showSignIn();
+    const email = f.auth.submitEmail('dev@example.com');
+    await f.tick();
+    f.otp();
+    await email;
+    const code = f.auth.submitCode('123456');
+    f.success();
+    await f.tick();
+    f.auth.dismiss();
+    expect(f.auth.state).toMatchObject({
+      open: true,
+      phase: 'syncing',
+      canCancel: false,
+    });
+    release();
+    await code;
   });
 
   it('settles cancellation before a new attempt and ignores late completion', async () => {

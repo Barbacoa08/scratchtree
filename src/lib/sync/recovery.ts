@@ -1,3 +1,4 @@
+import { readArchive, type ArchivedIntent } from './detached';
 import type { ScratchtreeDatabase } from './database';
 import type { PendingIntent } from './intents';
 import {
@@ -229,6 +230,7 @@ export interface RawRecovery {
   pending: PendingIntent[];
   recovery: RecoveryRecord[];
   buffers: RawBuffer[];
+  archived: ArchivedIntent[];
   journal: import('./intents').JournalMetadata;
 }
 /** Deliberately distinct from a normal backup; raw source is never truncated. */
@@ -272,6 +274,7 @@ export async function rawRecovery(
         recovery: await db.recovery.toArray(),
         buffers: await readRawBuffers(db),
         journal: await readJournalMetadata(db),
+        archived: await readArchive(db),
       };
     },
   );

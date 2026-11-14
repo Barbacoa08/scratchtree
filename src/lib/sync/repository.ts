@@ -1,4 +1,10 @@
 import {
+  readArchive,
+  installDevice,
+  snapshotOf,
+  type Transfer,
+} from './detached';
+import {
   retainRawBuffers,
   readRawBuffers,
   rawBufferKey,
@@ -100,6 +106,14 @@ export class DexieRepository implements Repository {
     null;
   private closed = false;
   private boundEpoch: string | null = null;
+  get viewEpoch() {
+    return this.boundEpoch;
+  }
+  /** Only after a validated transfer installed its matching pointer atomically. */
+  bindTransferredEpoch(epoch: string) {
+    if (this.boundEpoch !== null) throw stale();
+    this.boundEpoch = epoch;
+  }
   private viewKey() {
     return `library-view:${this.libraryId}`;
   }
@@ -410,9 +424,106 @@ export class DexieRepository implements Repository {
         return {
           epoch,
           backup: checked,
+          purges: (
+            await this.db.purges.where('epoch').equals(epoch).toArray()
+          ).map(providerFields),
           pending: orderedIntents(await this.db.pending.toArray()),
           journal: await readJournalMetadata(this.db),
+          archived: await readArchive(this.db),
         };
+      }),
+    );
+  }
+  /** Install a reconciled branch only while the pulled shared library is still exactly current.
+   * The transaction writes field deltas, original witnesses, and protected local facts together. */
+  adoptTransfer(
+    expected: { epoch: string; library: BackupV8['library'] } | null,
+    t: Transfer,
+    admitted: PendingIntent[],
+  ) {
+    return this.serial(async () => {
+      await this.db.transaction('rw', this.tables(), async () => {
+        const pointer = await this.db.libraries.get(this.libraryId);
+        if ((pointer?.epoch ?? null) !== (expected?.epoch ?? null))
+          throw stale();
+        const before: State = pointer
+          ? await this.read()
+          : {
+              epoch: t.epoch,
+              snapshot: emptyWorkspace(),
+              purgedIds: [],
+              recovery: [],
+            };
+        if (
+          expected &&
+          (!equal(before.snapshot.items, expected.library.items) ||
+            !equal(before.purgedIds, expected.library.purgedIds))
+        )
+          throw stale();
+        const replacing = before.epoch !== t.epoch;
+        if (
+          replacing &&
+          (before.snapshot.items.length || before.purgedIds.length) &&
+          !admitted.some(
+            (p) =>
+              p.command.kind === 'replaceLibrary' &&
+              p.command.previousEpoch === before.epoch &&
+              p.command.newEpoch === t.epoch,
+          )
+        )
+          throw stale();
+        if (!pointer)
+          await this.db.libraries.add({ id: this.libraryId, epoch: t.epoch });
+        else if (replacing) {
+          const changed = await this.db.libraries
+            .where('id')
+            .equals(this.libraryId)
+            .and((row) => row.epoch === before.epoch)
+            .modify({ epoch: t.epoch });
+          if (changed !== 1) throw stale();
+        }
+        const next: State = {
+          epoch: t.epoch,
+          snapshot: snapshotOf(t.backup),
+          purgedIds: t.backup.library.purgedIds,
+          recovery: t.backup.device.recovery,
+        };
+        this.encode(next);
+        await this.persist(
+          replacing
+            ? {
+                epoch: t.epoch,
+                snapshot: emptyWorkspace(),
+                purgedIds: [],
+                recovery: [],
+              }
+            : before,
+          next,
+          admitted.at(-1)?.recordedAt ?? 0,
+          new Map(t.purges.map((p) => [p.id, p.purgedAt])),
+        );
+        await installDevice(this.db, t);
+        for (const p of admitted)
+          await this.db.witnesses.put({
+            id: p.id,
+            epoch: p.epoch,
+            digest: p.digest,
+            recordedAt: p.recordedAt,
+          });
+      });
+      this.boundEpoch = t.epoch;
+    });
+  }
+  /** A same-epoch instance swap must retain late old-editor input without overlaying the new note. */
+  archiveSwitchedBuffers(buffers: RemoteBuffer[], originEpoch: string) {
+    return this.serial(() =>
+      this.db.transaction('rw', this.tables(), async () => {
+        const current = await this.read();
+        const archived = { ...current, epoch: originEpoch };
+        for (const b of buffers)
+          await this.retainRejectedDraft(archived, b, Date.now());
+        this.encode(archived);
+        await this.persistRecovery(archived);
       }),
     );
   }
@@ -851,7 +962,12 @@ export class DexieRepository implements Repository {
       })
     );
   }
-  private async persist(before: State, after: State, capturedAt = Date.now()) {
+  private async persist(
+    before: State,
+    after: State,
+    capturedAt = Date.now(),
+    purgeTimes?: Map<string, number>,
+  ) {
     const previous = new Map(before.snapshot.items.map((x) => [x.id, x]));
     for (const item of after.snapshot.items) {
       const old = previous.get(item.id),
@@ -882,7 +998,7 @@ export class DexieRepository implements Repository {
         await this.db.purges.put({
           id,
           epoch: after.epoch,
-          purgedAt: capturedAt,
+          purgedAt: purgeTimes?.get(id) ?? capturedAt,
         });
       }
     const oldOrders = new Map(

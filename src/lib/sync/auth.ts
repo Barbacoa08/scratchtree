@@ -19,7 +19,7 @@ export interface AuthHost {
   prepareSignIn(): Promise<CloudLogin>;
   cancelSignIn(): Promise<void>;
   finishSignIn(): Promise<Join | null>;
-  acceptCloud(): Promise<void>;
+  acceptCloud(): Promise<void | Join | null>;
   signOut(): Promise<void>;
 }
 type Attempt = {
@@ -90,8 +90,11 @@ export class CloudAuthController implements AuthPort {
     prompt?.onCancel();
   }
   showSignIn() {
-    if (!this.state.configured || this.state.authenticated || this.state.open)
+    if (!this.state.configured || this.state.open) return;
+    if (this.state.authenticated) {
+      if (this.state.phase === 'syncing') this.patch({ open: true });
       return;
+    }
     this.generation++;
     this.patch({ open: true, phase: 'email', error: null, canCancel: true });
   }
@@ -202,7 +205,7 @@ export class CloudAuthController implements AuthPort {
               phase: 'syncing',
               authenticated: true,
               error: null,
-              canCancel: true,
+              canCancel: false,
             });
             await this.finish(attempt);
           })
@@ -316,7 +319,7 @@ export class CloudAuthController implements AuthPort {
       this.state.join
     )
       return;
-    this.patch({ error: null });
+    this.patch({ error: null, canCancel: false });
     await this.finish(this.attempt);
   }
   async acceptCloud() {
@@ -324,7 +327,16 @@ export class CloudAuthController implements AuthPort {
     this.finishing = true;
     this.patch({ canCancel: false, error: null });
     try {
-      await this.host.acceptCloud();
+      const changed = await this.host.acceptCloud();
+      if (changed) {
+        this.patch({
+          join: changed,
+          canCancel: true,
+          error:
+            'The notes changed. Review the updated counts before continuing.',
+        });
+        return;
+      }
       this.patch({
         phase: 'signed-in',
         open: false,

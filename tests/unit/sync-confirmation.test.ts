@@ -235,6 +235,7 @@ it('streams oversized raw Unicode recovery as exact bounded chunks distinct from
     recovery: [],
     buffers: [],
     journal: { sequence: 0, sources: [] },
+    archived: [],
   };
   const chunks: string[] = [];
   for await (const chunk of recoveryChunks(raw)) {
