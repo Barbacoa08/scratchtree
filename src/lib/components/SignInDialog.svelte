@@ -8,6 +8,9 @@
   let emailInput: HTMLInputElement;
   let codeInput: HTMLInputElement;
   let verificationStatus = $state<HTMLElement>();
+  let syncStatus = $state<HTMLElement>();
+  let joinButton = $state<HTMLButtonElement>();
+  let retryButton = $state<HTMLButtonElement>();
   let emailValid = $state(false);
   let submitting = false;
   let priorPhase = untrack(() => value.phase);
@@ -16,9 +19,19 @@
     node.showModal();
     void tick().then(() => {
       emailValid = emailInput.validity.valid;
-      emailInput.focus();
+      focusCurrent();
     });
     return { destroy: () => node.close() };
+  }
+  function focusCurrent() {
+    if (value.phase === 'syncing') {
+      if (!value.canCancel) syncStatus?.focus();
+      else if (value.join) joinButton?.focus();
+      else if (value.error) retryButton?.focus();
+      else syncStatus?.focus();
+    } else if (value.phase === 'verifying') verificationStatus?.focus();
+    else if (value.phase === 'code') codeInput?.focus();
+    else if (value.phase === 'email') emailInput?.focus();
   }
   $effect(() => {
     const phase = value.phase;
@@ -32,6 +45,25 @@
         emailInput.focus();
       });
     priorPhase = phase;
+  });
+  $effect(() => {
+    const phase = value.phase;
+    const canCancel = value.canCancel;
+    const join = value.join;
+    const error = value.error;
+    if (phase === 'syncing') {
+      void tick().then(() => {
+        if (
+          value.phase === phase &&
+          value.canCancel === canCancel &&
+          value.join === join &&
+          value.error === error &&
+          (dialog?.contains(document.activeElement) ||
+            document.activeElement === document.body)
+        )
+          focusCurrent();
+      });
+    }
   });
   function dismiss() {
     if (value.canCancel) auth.dismiss();
@@ -105,6 +137,9 @@
     }}
   >
     <h2 id="auth-title">Sign in / sign up</h2>
+    <p class="auth-instruction">
+      Sign in with an existing account. Sign-up is coming soon.
+    </p>
     <label for="auth-email">Email</label>
     <input
       id="auth-email"
@@ -137,8 +172,14 @@
       >
         Finishing sign in. Please wait.
       </p>{/if}
-    {#if value.phase === 'syncing' && !value.join}<p role="status">
-        Signed in. Initial sync is pending.
+    {#if value.phase === 'syncing' && (!value.join || !value.canCancel)}<p
+        role="status"
+        tabindex="-1"
+        bind:this={syncStatus}
+      >
+        {value.join
+          ? 'Applying synced notes. Please wait.'
+          : 'Signed in. Initial sync is pending.'}
       </p>{/if}
     {#if value.phase === 'sending-code'}<p role="status">Sending code…</p>{/if}
     {#if value.join}
@@ -154,11 +195,13 @@
       {#if value.join}
         <button
           type="button"
-          disabled={!auth.acceptCloud}
+          bind:this={joinButton}
+          disabled={!auth.acceptCloud || !value.canCancel}
           onclick={() => void auth.acceptCloud?.()}>Use synced notes</button
         >
       {:else if value.phase === 'syncing' && value.error}<button
           type="button"
+          bind:this={retryButton}
           onclick={() => void auth.retrySync()}>Retry sync</button
         >
       {:else if value.phase === 'email' || value.phase === 'sending-code'}<button

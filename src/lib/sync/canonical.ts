@@ -1,3 +1,4 @@
+import { LibraryCapacityError } from './backup';
 import { COLORS, MAX_SOURCE, type Item } from '../domain/notes';
 import type { SharedItem, OrderRow, PurgeRow, ProjectionNotice } from './types';
 
@@ -67,7 +68,6 @@ export function projectLibrary(
       !metadataId(row.epoch) ||
       (row.kind !== 'note' && row.kind !== 'tree') ||
       typeof row.markdown !== 'string' ||
-      bytes(row.markdown) > MAX_SOURCE ||
       typeof row.done !== 'boolean' ||
       (row.color !== null && !COLORS.includes(row.color)) ||
       !integer(row.createdAt) ||
@@ -128,7 +128,14 @@ export function projectLibrary(
     unique(orderGroups, JSON.stringify([row.epoch, key]));
     if (row.epoch === epoch) groupOrders.set(key, row);
   }
-  if (byId.size > 20000) invalid();
+  if (byId.size > 20000)
+    throw new LibraryCapacityError('The shared library exceeds 20,000 notes.');
+  if (
+    Array.from(byId.values()).some((item) => bytes(item.markdown) > MAX_SOURCE)
+  )
+    throw new LibraryCapacityError(
+      'A shared note exceeds the 1 MiB source limit.',
+    );
   const items = [...byId.values()].sort((a, b) => compare(a.id, b.id));
   for (const item of items) {
     if (item.parentId !== null && !byId.has(item.parentId)) {

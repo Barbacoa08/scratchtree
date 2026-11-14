@@ -56,6 +56,7 @@ export class PersistentSession {
   private preservingSwitch?: { epoch: string; generation: number };
   private join: string | null = null;
   private automatic = false;
+  private expiredRecovery = false;
   private receiptState: SyncState = {
     state: 'local-only',
     lastConfirmed: null,
@@ -101,6 +102,7 @@ export class PersistentSession {
         };
       },
       retry: async () => {
+        if (this.expiredRecovery) return;
         if (this.auth.state.phase === 'syncing') {
           this.auth.showSignIn();
           return;
@@ -129,13 +131,27 @@ export class PersistentSession {
         await engine?.retry();
       },
       exportRecovery: () => this.engine.exportRecovery(),
+      exportOverflow: () => this.engine.exportOverflow(),
       inspectOverflow: () => this.engine.inspectOverflow(),
-      purgeOverflow: (r) => this.engine.purgeOverflow(r),
+      purgeOverflow: (r) =>
+        this.expiredRecovery
+          ? Promise.reject(
+              Error(
+                'This expired cache is read-only. Export the full raw library.',
+              ),
+            )
+          : this.engine.purgeOverflow(r),
     };
     const call = <K extends keyof DexieRepository>(
       method: K,
       ...args: DexieRepository[K] extends (...a: infer A) => unknown ? A : never
     ) => {
+      if (this.expiredRecovery)
+        return Promise.reject(
+          Error(
+            'This saved account cache is available for recovery export only.',
+          ),
+        );
       const repo = this.repo,
         epoch = repo.viewEpoch,
         captured = structuredClone(args);
@@ -150,7 +166,9 @@ export class PersistentSession {
           repo !== this.repo ||
           (epoch !== null && epoch !== repo.viewEpoch) ||
           (this.controller &&
-            this.priorEpoch !== null &&
+            (this.priorEpoch !== null ||
+              this.preservingSwitch?.generation ===
+                this.controller.state.cacheGeneration) &&
             method !== 'loadWorkspace')
         )
           throw inactive();
@@ -194,37 +212,83 @@ export class PersistentSession {
       if (a.mode === 'attached') {
         const db = await s.cloud(false);
         const cached = new DexieRepository(db, options.files, a.account!);
-        if (!db.cloud.currentUser.getValue().isLoggedIn) {
+        const user = db.cloud.currentUser.getValue();
+        if (user.isLoggedIn) await s.requireUser(db, a.account);
+        const expired =
+          user.accessTokenExpiration !== undefined &&
+          !(+user.accessTokenExpiration > Date.now());
+        if (!user.isLoggedIn || expired) {
           // Expired credentials never unlock a different account. Preserve the previously
           // bound cache before asking for fresh OTP (including all unconfirmed edits).
           if (!(await db.libraries.get(a.account!)))
             throw Error('The saved shared library is unavailable.');
-          await cached.loadWorkspace();
-          const t = await cached.readTransfer();
-          const detached = await detach(plain, t, a.account!);
-          db.close();
-          s.stopAuth();
-          s = new PersistentSession(options, plain, detached);
-          s.bind(new DexieRepository(plain, options.files));
-        } else {
-          await s.requireUser(db, a.account);
-          s.bind(cached);
-          s.candidate = undefined;
-          // Serve the existing cache before transport setup. Reopen failure leaves every
-          // Repository operation available; Retry can re-enable the network later.
-          const session = s;
-          void s
-            .lifecycle(() => session.enableTransport(a.account!))
-            .catch(() => {
-              if (!session.closed)
-                session.publish({
-                  ...session.receiptState,
-                  state: 'needs-sync',
-                  detail: 'Could not start sync. Retry when connected.',
-                });
+          try {
+            await cached.loadWorkspace();
+          } catch (error) {
+            const assessment = await cached.assessView();
+            if (
+              assessment.kind !== 'shared-capacity' &&
+              assessment.kind !== 'device-capacity' &&
+              assessment.kind !== 'invalid-shared'
+            )
+              throw error;
+            // No SDK sync, login, logout, or cache mutation in this recovery session.
+            s.expiredRecovery = true;
+            s.candidate = undefined;
+            s.bind(cached);
+            s.publish({
+              state: 'needs-sync',
+              lastConfirmed: null,
+              recoveries: await db.recovery.count(),
+              readOnlyRecovery: true,
+              detail:
+                assessment.kind === 'invalid-shared'
+                  ? 'Sign-in expired and the shared notes contain invalid data. Export the full raw library for repair before signing in again.'
+                  : 'Sign-in expired and these notes exceed local capacity. Export the full raw library for repair before signing in again.',
+              overflow: {
+                items: assessment.shared.notes.length,
+                correctable: false,
+              },
             });
+            return s;
+          }
+          // A still-logged-in account can use the SDK's normal refresh path
+          // once we know its cache fits. A signed-out SDK needs a detached copy.
+          if (!user.isLoggedIn) {
+            const t = await cached.readTransfer();
+            const detached = await detach(plain, t, a.account!);
+            db.close();
+            s.stopAuth();
+            s = new PersistentSession(options, plain, detached);
+            s.bind(new DexieRepository(plain, options.files));
+            return s;
+          }
         }
-      } else s.bind(new DexieRepository(plain, options.files));
+        s.bind(cached);
+        s.candidate = undefined;
+        // Serve the existing cache before transport setup. Reopen failure leaves every
+        // Repository operation available; Retry can re-enable the network later.
+        const session = s;
+        void s
+          .lifecycle(() => session.enableTransport(a.account!))
+          .catch(() => {
+            if (!session.closed && !session.receiptState.overflow)
+              session.publish({
+                ...session.receiptState,
+                state: 'needs-sync',
+                detail: 'Could not start sync. Retry when connected.',
+              });
+          });
+      } else {
+        const local = new DexieRepository(
+          plain,
+          options.files,
+          undefined,
+          a.mode === 'local',
+        );
+        await local.settleLocalWrites();
+        s.bind(local);
+      }
       return s;
     } catch (error) {
       s?.close();
@@ -326,6 +390,10 @@ export class PersistentSession {
       throw Error('Save your current input before switching notes.');
   }
   private async signOut() {
+    if (this.expiredRecovery)
+      throw Error(
+        'Export the full raw library before repairing this expired cache.',
+      );
     await this.flush();
     const account = this.activation.account;
     await this.lifecycle(async () => {
@@ -433,7 +501,9 @@ export class PersistentSession {
             ? { epoch: remote.epoch, library: remote.backup.library }
             : null,
           transfer,
-          admitted,
+          // Fresh seeding writes the complete captured snapshot. Any remaining
+          // never-bound intents lacked a proven local completion at startup.
+          this.activation.mode === 'local' ? [] : admitted,
         );
         // Both stores are durable here. Only the final plain marker permits future attached opens.
         await this.mark({
@@ -470,7 +540,20 @@ export class PersistentSession {
         this.check();
         if (this.repo !== old) throw inactive();
         const repo = new DexieRepository(db, this.options.files, account);
+        const previousEpoch = old.viewEpoch;
         await repo.loadWorkspace();
+        if (
+          previousEpoch &&
+          previousEpoch !== repo.viewEpoch &&
+          !this.priorEpoch
+        ) {
+          const preserving = this.preservingSwitch;
+          this.priorEpoch =
+            preserving &&
+            preserving.generation === this.controller?.state.cacheGeneration
+              ? preserving.epoch
+              : previousEpoch;
+        }
         this.automatic = true;
         this.bind(repo);
         this.candidate = undefined;
@@ -502,7 +585,7 @@ export class PersistentSession {
       },
     });
     this.engine.subscribe((s) => this.publish(s));
-    this.engine.start();
+    if (!this.expiredRecovery) this.engine.start();
   }
   private publish(s: SyncState) {
     this.receiptState = s;
@@ -533,6 +616,7 @@ export class PersistentSession {
       throw Error('Could not refresh your notes. Your input is retained.');
   }
   private refresh(buffers: RemoteBuffer[]) {
+    if (this.expiredRecovery) return Promise.reject(inactive());
     const repo = this.repo;
     return this.writes(async () => {
       if (this.repo !== repo || this.closed) throw inactive();

@@ -1,5 +1,6 @@
+import { backupFixture } from '../fixtures/backup';
 import { it, expect } from 'vitest';
-import { validateBackup, encodeBackup } from '../../src/lib/domain/backup';
+import { validateBackup, encodeBackup } from '../fixtures/backup';
 import { item } from '../fixtures/items';
 it('accepts a complete current hierarchy before replacement', () => {
   const library = {
@@ -13,8 +14,5 @@ it('accepts a complete current hierarchy before replacement', () => {
     drafts: [],
     undoDeleteIds: [],
   };
-  expect(validateBackup(encodeBackup(library))).toHaveProperty(
-    'library',
-    library,
-  );
+  expect(validateBackup(encodeBackup(library))).toEqual(backupFixture(library));
 });

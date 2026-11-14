@@ -148,6 +148,7 @@ export function validateCloudBackup(text: string): BackupV8 | AppError {
     );
   return value as unknown as BackupV8;
 }
+export class LibraryCapacityError extends Error {}
 export function encodeCloudBackup(
   backup: Omit<BackupV8, 'format' | 'version' | 'exportedAt'>,
   exportedAt = new Date().toISOString(),
@@ -158,6 +159,8 @@ export function encodeCloudBackup(
     version: 8,
     exportedAt,
   });
+  if (bytes(text) > MAX_ENVELOPE)
+    throw new LibraryCapacityError('Backup exceeds the 10 MiB capacity.');
   const checked = validateCloudBackup(text);
   if ('code' in checked) throw new Error(checked.message);
   return text;

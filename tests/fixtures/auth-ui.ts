@@ -21,6 +21,8 @@ let syncState: SyncState = {
 };
 const authListeners = new Set<(state: AuthState) => void>();
 let failRecovery = false;
+let failSignOut = false;
+let signOutAttempts = 0;
 let replaceAfterPurge = false;
 let lastPurge: { epoch: string; ids: string[] } | null = null;
 let overflowEpoch = 'captured-epoch';
@@ -61,7 +63,23 @@ export const auth: AuthPort = {
     if (authState.canCancel) setAuth({ open: false });
   },
   async signOut() {
-    setAuth({ phase: 'signed-out', authenticated: false });
+    signOutAttempts++;
+    setAuth({ phase: 'signing-out', canCancel: false, error: null });
+    if (failSignOut) {
+      setAuth({
+        phase: 'signed-in',
+        authenticated: true,
+        canCancel: true,
+        error: 'Synthetic sign-out failure',
+      });
+      return;
+    }
+    setAuth({
+      phase: 'signed-out',
+      authenticated: false,
+      canCancel: true,
+      error: null,
+    });
   },
   async acceptCloud() {
     setAuth({ join: null, error: 'Synced notes selected.' });
@@ -83,6 +101,10 @@ export const sync: SyncPort = {
     if (failRecovery) throw new Error('Synthetic export failure');
     setSync({ detail: 'Recovery export requested.' });
   },
+  async exportOverflow() {
+    if (failRecovery) throw new Error('Synthetic export failure');
+    setSync({ detail: 'Full raw library export requested.' });
+  },
   async inspectOverflow() {
     return { epoch: overflowEpoch, overflow: true, rows: overflowRows };
   },
@@ -103,6 +125,12 @@ export function install() {
     authUiFixture: {
       setAuth,
       setSync,
+      failSignOut(value: boolean) {
+        failSignOut = value;
+      },
+      signOutAttempts() {
+        return signOutAttempts;
+      },
       setRows(rows: typeof overflowRows) {
         overflowRows = rows;
       },

@@ -23,7 +23,8 @@ import {
 } from './confirmation';
 import {
   rawRecovery,
-  rawViewValid,
+  RAW_BUFFER_PREFIX,
+  ordinaryRecovery,
   resolveIntent,
   cleanupResolvedWitness,
   recoveryChunks,
@@ -85,6 +86,12 @@ export class SyncEngine implements SyncPort {
       Promise.all([
         this.options.db.pending.toArray(),
         this.options.db.recovery.toArray(),
+        this.options.db.drafts.toArray(),
+        this.options.db.undo.toArray(),
+        this.options.db.device
+          .where('key')
+          .startsWith(RAW_BUFFER_PREFIX)
+          .toArray(),
       ]),
     ).subscribe({
       next: () => this.schedule(),
@@ -205,22 +212,8 @@ export class SyncEngine implements SyncPort {
     const { db, repository } = this.options;
     if (this.closed) return;
     const recoveries = await db.recovery.count();
-    let local: Awaited<ReturnType<typeof rawViewValid>>;
-    try {
-      local = await rawViewValid(db, repository.libraryId);
-      this.patch({ overflow: undefined });
-    } catch {
-      if (this.closed || signal.aborted) return false;
-      const raw = await rawRecovery(db, repository.libraryId);
-      this.patch({
-        state: 'needs-sync',
-        detail:
-          'The merged library needs recovery. Export all raw notes before making corrections.',
-        recoveries,
-        overflow: { items: raw.notes.length },
-      });
-      return;
-    }
+    const local = await this.confirmableView();
+    if (!local) return false;
     if (this.closed || signal.aborted) return false;
     if (!db.cloudEnabled) {
       this.patch({ state: 'local-only', detail: null, recoveries });
@@ -360,7 +353,8 @@ export class SyncEngine implements SyncPort {
       this.cleanupAfter = moreCleanup
         ? (cleanup.at(-1)?.key ?? this.cleanupAfter)
         : '';
-      let final = await rawViewValid(db, repository.libraryId);
+      let final = await this.confirmableView();
+      if (!final) return false;
       let evidenced = !!(
         this.baseline &&
         proof &&
@@ -375,7 +369,8 @@ export class SyncEngine implements SyncPort {
             libraryId: repository.libraryId,
             epoch: final.shared.epoch,
           }));
-        final = await rawViewValid(db, repository.libraryId);
+        final = await this.confirmableView();
+        if (!final) return false;
         evidenced = !!(
           remote.shared &&
           remote.epoch === final.shared.epoch &&
@@ -414,18 +409,35 @@ export class SyncEngine implements SyncPort {
       return false;
     }
   }
+  private async confirmableView() {
+    const assessment = await this.options.repository.assessView();
+    if (assessment.kind === 'ready') {
+      this.patch({ overflow: undefined });
+      return assessment;
+    }
+    const shared = assessment.kind === 'shared-capacity';
+    this.patch({
+      state: 'needs-sync',
+      recoveries: await this.options.db.recovery.count(),
+      detail: shared
+        ? 'The merged library exceeds its limits. Export the full raw library before removing notes.'
+        : assessment.kind === 'invalid-shared'
+          ? 'The shared notes contain invalid data. Export the full raw library for repair.'
+          : assessment.kind === 'device-capacity'
+            ? 'These notes and this Mac’s drafts and recovery exceed local capacity. Export the full raw library. A smaller shared library can reopen with your drafts intact.'
+            : 'Saved input is waiting for the workspace to reopen.',
+      overflow:
+        assessment.kind === 'adoption'
+          ? undefined
+          : { items: assessment.shared.notes.length, correctable: shared },
+    });
+    return null;
+  }
   async inspectOverflow() {
     return this.options.serialize(async () => {
-      const raw = await rawRecovery(
-        this.options.db,
-        this.options.repository.libraryId,
-      );
-      let overflow = false;
-      try {
-        await rawViewValid(this.options.db, this.options.repository.libraryId);
-      } catch {
-        overflow = true;
-      }
+      const assessment = await this.options.repository.assessView();
+      const raw = assessment.shared;
+      const overflow = assessment.kind === 'shared-capacity';
       return {
         epoch: raw.epoch,
         overflow,
@@ -444,28 +456,20 @@ export class SyncEngine implements SyncPort {
     await this.options.serialize(async () => {
       const { db, repository } = this.options;
       if (this.closed) throw new Error('Sync is closed.');
-      try {
-        await rawViewValid(db, repository.libraryId);
-        throw new Error('The library is valid. Use normal deletion.');
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message === 'The library is valid. Use normal deletion.'
-        )
-          throw error;
-      }
+      const assessment = await repository.assessView();
+      if (assessment.kind !== 'shared-capacity')
+        throw new Error(
+          'The shared notes are within their limits. Use normal deletion.',
+        );
       if (
         !captured.ids.length ||
         captured.ids.some((id) => !uuid(id)) ||
         new Set(captured.ids).size !== captured.ids.length
       )
         throw new Error('Select exact recovery notes.');
-      const raw = await rawRecovery(db, repository.libraryId);
-      const available = new Set(
-        raw.notes.map((value) => (value as { id: string }).id),
-      );
+      const available = new Set(assessment.shared.notes.map((row) => row.id));
       if (
-        raw.epoch !== captured.epoch ||
+        assessment.shared.epoch !== captured.epoch ||
         captured.ids.some((id) => !available.has(id))
       )
         throw new Error('The recovery selection changed.');
@@ -492,47 +496,53 @@ export class SyncEngine implements SyncPort {
       };
       // Preservation is committed separately before any replicated mutation.
       await preservePendingIntent(db, intent);
-      await db.transaction(
-        'rw',
-        [db.libraries, db.notes, db.purges, db.witnesses, db.pending],
-        async () => {
-          if (
-            (await db.libraries.get(repository.libraryId))?.epoch !==
-            captured.epoch
-          )
-            throw new Error('The library was replaced.');
-          for (const id of captured.ids) {
-            if (!(await db.notes.get([captured.epoch, id])))
-              throw new Error('The recovery selection changed.');
-          }
-          for (const id of captured.ids) {
-            await db.notes.delete([captured.epoch, id]);
-            await db.purges.put({
-              id,
-              epoch: captured.epoch,
-              purgedAt: intent.recordedAt,
-            });
-          }
-          await db.witnesses.put({
-            id: intent.id,
-            epoch: intent.epoch,
-            digest: intent.digest,
-            recordedAt: intent.recordedAt,
+      await db.transaction('rw', db.tables, async () => {
+        if (
+          (await db.libraries.get(repository.libraryId))?.epoch !==
+          captured.epoch
+        )
+          throw new Error('The library was replaced.');
+        if ((await repository.assessView()).kind !== 'shared-capacity')
+          throw new Error(
+            'The shared notes are within their limits. Use normal deletion.',
+          );
+        for (const id of captured.ids) {
+          if (!(await db.notes.get([captured.epoch, id])))
+            throw new Error('The recovery selection changed.');
+        }
+        for (const id of captured.ids) {
+          await db.notes.delete([captured.epoch, id]);
+          await db.purges.put({
+            id,
+            epoch: captured.epoch,
+            purgedAt: intent.recordedAt,
           });
-          await db.pending.update(intent.id, { localApplied: true });
-        },
-      );
+        }
+        await db.witnesses.put({
+          id: intent.id,
+          epoch: intent.epoch,
+          digest: intent.digest,
+          recordedAt: intent.recordedAt,
+        });
+        await db.pending.update(intent.id, { localApplied: true });
+        await repository.settleLocalWrites();
+      });
     });
     this.invalidate();
     this.schedule();
   }
-  async exportRecovery() {
+  exportRecovery() {
+    return this.writeRecovery(false);
+  }
+  exportOverflow() {
+    return this.writeRecovery(true);
+  }
+  private async writeRecovery(full: boolean) {
     await this.options.serialize(async () => {
       if (this.closed) return;
-      const raw = await rawRecovery(
-        this.options.db,
-        this.options.repository.libraryId,
-      );
+      const raw = full
+        ? await rawRecovery(this.options.db, this.options.repository.libraryId)
+        : await ordinaryRecovery(this.options.db);
       if (this.options.files.chooseRecoveryWrite) {
         await this.options.files.chooseRecoveryWrite(recoveryChunks(raw));
         return;

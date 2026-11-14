@@ -23,7 +23,6 @@ const sourceModules = new Set([
   'src/lib/domain/notes.ts',
   'src/lib/domain/search.ts',
   'src/lib/domain/timestamps.ts',
-  'src/lib/domain/backup.ts',
   'src/lib/platform/workspace.ts',
   'src/lib/platform/actions.ts',
   'src/lib/platform/lifecycle.ts',

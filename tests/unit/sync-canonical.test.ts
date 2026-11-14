@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeBackup, validateBackup } from '../../src/lib/domain/backup';
+import { encodeBackup, validateBackup } from '../fixtures/backup';
 import { MAX_SOURCE } from '../../src/lib/domain/notes';
 import { projectLibrary } from '../../src/lib/sync/canonical';
 import type { SharedItem, OrderRow, PurgeRow } from '../../src/lib/sync/types';

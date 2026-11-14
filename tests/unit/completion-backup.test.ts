@@ -1,5 +1,6 @@
+import { backupFixture } from '../fixtures/backup';
 import { expect, it } from 'vitest';
-import { encodeBackup, validateBackup } from '../../src/lib/domain/backup';
+import { encodeBackup, validateBackup } from '../fixtures/backup';
 import { MAX_SOURCE, MAX_ENVELOPE } from '../../src/lib/domain/notes';
 import { item } from '../fixtures/items';
 const id = '11111111-1111-4111-8111-111111111111';
@@ -8,12 +9,12 @@ const library = () => ({
   drafts: [],
   undoDeleteIds: [],
 });
-it('roundtrips completion in version-7 library without rewriting source', () => {
+it('roundtrips completion in version-8 library without rewriting source', () => {
   const s = library();
-  expect(validateBackup(encodeBackup(s))).toHaveProperty('library', s);
+  expect(validateBackup(encodeBackup(s))).toEqual(backupFixture(s));
   for (const done of [false, true]) {
     s.items[0].done = done;
-    expect(validateBackup(encodeBackup(s))).toHaveProperty('library', s);
+    expect(validateBackup(encodeBackup(s))).toEqual(backupFixture(s));
   }
   for (const done of [undefined, null, 0, 1, 'false', [], {}]) {
     const b = JSON.parse(encodeBackup(s));
@@ -27,7 +28,7 @@ it('roundtrips completion in version-7 library without rewriting source', () => 
 it('enforces UTF-8 source capacity including a completed note and draft', () => {
   const s = library();
   s.items[0].markdown = 'α'.repeat(MAX_SOURCE / 2);
-  expect(validateBackup(encodeBackup(s))).toHaveProperty('library', s);
+  expect(validateBackup(encodeBackup(s))).toEqual(backupFixture(s));
   s.items[0].markdown += 'a';
   expect(validateBackup(encodeBackup(s))).toHaveProperty('code');
 });
@@ -48,7 +49,7 @@ it('includes completion, drafts, and envelope metadata in exact compact capacity
     MAX_ENVELOPE - Buffer.byteLength(encodeBackup(s)),
   );
   expect(Buffer.byteLength(encodeBackup(s))).toBe(MAX_ENVELOPE);
-  expect(validateBackup(encodeBackup(s))).toHaveProperty('library', s);
+  expect(validateBackup(encodeBackup(s))).toEqual(backupFixture(s));
   s.drafts[0].markdown += 'x';
   expect(validateBackup(encodeBackup(s))).toHaveProperty('code');
 });

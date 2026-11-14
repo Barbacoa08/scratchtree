@@ -230,15 +230,16 @@ test('successful full backup replacement resets all session visits', async ({
   await child(page, 'Parent');
   await page.evaluate(() => {
     (window as any).__test.repo.restoreText = JSON.stringify({
-      format: 'scratchtree-alpha',
-      version: 7,
+      format: 'scratchtree',
+      version: 8,
       exportedAt: '2026-11-11T00:00:00.000Z',
-      library: {
-        items: [],
+      library: { items: [], purgedIds: [] },
+      device: {
         drafts: [
           { key: 'compose', markdown: 'restored', revision: 1, updatedAt: 0 },
         ],
         undoDeleteIds: [],
+        recovery: [],
       },
     });
   });
@@ -511,10 +512,11 @@ test('cancelled restore and failed replacement preserve the current session visi
   const parent = await child(page, 'Parent');
   await page.evaluate(() => {
     (window as any).__test.repo.restoreText = JSON.stringify({
-      format: 'scratchtree-alpha',
-      version: 7,
+      format: 'scratchtree',
+      version: 8,
       exportedAt: '2026-11-11T00:00:00.000Z',
-      library: { items: [], drafts: [], undoDeleteIds: [] },
+      library: { items: [], purgedIds: [] },
+      device: { drafts: [], undoDeleteIds: [], recovery: [] },
     });
   });
   await page
@@ -608,3 +610,38 @@ test('manual collapse relocates focus only from the hidden rail body', async ({
     page.getByRole('button', { name: 'Show Details', exact: true }),
   ).toBeFocused();
 });
+
+for (const activation of ['pointer', 'keyboard'] as const)
+  test(`Details ${activation} activation owns focus through a delayed inline save and preserves newer Search`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1400, height: 800 });
+    await page.goto('/?fixture');
+    await capture(page).fill('Synthetic Details focus source');
+    await capture(page).press('Enter');
+    await page.getByRole('article', { name: 'Saved note' }).click();
+    await page.keyboard.press('e');
+    const editor = page.getByRole('textbox', { name: 'Edit Markdown' });
+    await page.evaluate(() => (window as any).__test.delay());
+    await editor.fill('Synthetic retained Details edit');
+    const toggle = page.getByRole('button', {
+      name: /^(Hide|Show) Details$/,
+    });
+    if (activation === 'pointer') await toggle.click();
+    else {
+      await toggle.focus();
+      await toggle.press('Enter');
+    }
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toBeFocused();
+    const search = page.getByRole('searchbox');
+    await search.focus();
+    await page.evaluate(() => (window as any).__test.release());
+    await expect(editor).toHaveCount(0);
+    await expect(search).toBeFocused();
+    expect(
+      await page.evaluate(
+        () => (window as any).__test.repo.snapshot.items[0].markdown,
+      ),
+    ).toBe('Synthetic retained Details edit');
+  });

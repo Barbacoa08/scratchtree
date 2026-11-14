@@ -231,6 +231,7 @@ it('streams oversized raw Unicode recovery as exact bounded chunks distinct from
     orders: [],
     purges: [],
     drafts: [],
+    undo: [],
     pending: [],
     recovery: [],
     buffers: [],

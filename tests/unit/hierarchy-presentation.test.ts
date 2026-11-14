@@ -4,7 +4,7 @@ import {
   emptyWorkspace,
   type WorkspaceSnapshot,
 } from '../../src/lib/domain/notes';
-import { encodeBackup, validateBackup } from '../../src/lib/domain/backup';
+import { encodeBackup, validateBackup } from '../fixtures/backup';
 import { item } from '../fixtures/items';
 function acceptedDeepWorkspace(): WorkspaceSnapshot {
   const s = emptyWorkspace();
@@ -34,7 +34,7 @@ it('bounds one deep displayed source location instead of emitting its complete a
   const s = acceptedDeepWorkspace();
   const text = encodeBackup(s);
   expect(new TextEncoder().encode(text).length).toBeLessThan(6 * 1024 * 1024);
-  expect(validateBackup(text)).toHaveProperty('version', 7);
+  expect(validateBackup(text)).toHaveProperty('version', 8);
   expect(
     Array.from(
       hierarchy.locationLabel(

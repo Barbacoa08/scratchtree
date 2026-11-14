@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'"
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://z9hvfxrwq.dexie.cloud wss://z9hvfxrwq.dexie.cloud https://scratchtree.netlify.app/api/account-exists; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'"
     }
   },
   "bundle": {

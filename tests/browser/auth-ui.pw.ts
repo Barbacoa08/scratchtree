@@ -313,7 +313,7 @@ test('overflow recovery is reachable with no ordinary recovery records and exact
   await page.getByRole('button', { name: 'Hide Details' }).click();
   await page.getByRole('button', { name: 'Needs sync' }).click();
   await expect(
-    page.getByRole('button', { name: 'Export recovery' }),
+    page.getByRole('button', { name: 'Export full raw library' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Review raw notes' }).click();
   const dialog = page.getByRole('dialog', { name: 'Recover merged notes' });
@@ -548,4 +548,170 @@ test('raw recovery inspects exact matching-prefix sources before removing the ch
     epoch: 'captured-epoch',
     ids: ['00000000-0000-4000-8000-000000000002'],
   });
+});
+
+test('sign-out guards input and workspace commands until the local store is ready', async ({
+  page,
+}) => {
+  await page.goto('/?fixture&authFixture');
+  const composer = page.getByRole('textbox', { name: 'New note Markdown' });
+  await composer.waitFor();
+  await composer.fill('Retained local draft');
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      authenticated: true,
+      phase: 'signing-out',
+      canCancel: false,
+      open: false,
+    }),
+  );
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Signing out…' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Sign out', exact: true }),
+  ).toBeDisabled();
+  await expect(composer).toHaveAttribute('aria-readonly', 'true');
+  await expect(
+    page.getByRole('button', { name: 'Save note', exact: true }),
+  ).toBeDisabled();
+  await page.keyboard.press('Meta+n');
+  await expect(page.locator('.note-card')).toHaveCount(0);
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      authenticated: false,
+      phase: 'signed-out',
+      canCancel: true,
+    }),
+  );
+  await expect(composer).toHaveAttribute('aria-readonly', 'false');
+  await expect(composer).toHaveText('Retained local draft');
+  await expect(page.getByText('Signing out…', { exact: true })).toHaveCount(0);
+});
+
+test('initial sync and join adoption provide focused status and actionable decisions', async ({
+  page,
+}) => {
+  await page.goto('/?fixture&authFixture');
+  await page.getByRole('button', { name: 'Sign in / sign up' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(
+    dialog.getByText(
+      'Sign in with an existing account. Sign-up is coming soon.',
+    ),
+  ).toBeVisible();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      phase: 'syncing',
+      authenticated: true,
+      canCancel: false,
+    }),
+  );
+  const status = dialog.getByRole('status');
+  await expect(status).toHaveText('Signed in. Initial sync is pending.');
+  await expect(status).toBeFocused();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      canCancel: true,
+      join: { localNotes: 2, cloudNotes: 3 },
+    }),
+  );
+  const use = dialog.getByRole('button', { name: 'Use synced notes' });
+  await expect(use).toBeFocused();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({ canCancel: false }),
+  );
+  await expect(use).toBeDisabled();
+  await expect(dialog.getByRole('status')).toBeFocused();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      canCancel: true,
+      error: 'Try adoption again',
+    }),
+  );
+  await expect(use).toBeEnabled();
+  await expect(use).toBeFocused();
+});
+
+test('closed dialog sign-out failure remains visible and retryable in compact details', async ({
+  page,
+}) => {
+  await page.goto('/?fixture&authFixture');
+  await page.getByRole('button', { name: 'Hide Details' }).click();
+  await page.evaluate(() => {
+    const f = (window as any).authUiFixture;
+    f.setAuth({ authenticated: true, phase: 'signed-in' });
+    f.failSignOut(true);
+  });
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText(
+    'Synthetic sign-out failure',
+  );
+  await expect(
+    page.getByRole('textbox', { name: 'New note Markdown' }),
+  ).toHaveAttribute('aria-readonly', 'false');
+  await page.evaluate(() => (window as any).authUiFixture.failSignOut(false));
+  await page.getByRole('button', { name: 'Retry sign out' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Sign in / sign up' }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => (window as any).authUiFixture.signOutAttempts()),
+  ).toBe(2);
+});
+
+test('reopened sync decisions and retry receive focus without stealing newer outside focus', async ({
+  page,
+}) => {
+  await page.goto('/?fixture&authFixture');
+  await page.getByRole('button', { name: 'Sign in / sign up' }).waitFor();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      open: true,
+      phase: 'syncing',
+      authenticated: true,
+      canCancel: true,
+      join: { localNotes: 2, cloudNotes: 3 },
+    }),
+  );
+  const dialog = page.getByRole('dialog');
+  await expect(
+    dialog.getByRole('button', { name: 'Use synced notes' }),
+  ).toBeFocused();
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      open: true,
+      join: null,
+      error: 'Network unavailable',
+    }),
+  );
+  await expect(
+    dialog.getByRole('button', { name: 'Retry sync' }),
+  ).toBeFocused();
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  const composer = page.getByRole('textbox', { name: 'New note Markdown' });
+  await composer.focus();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({ error: null }),
+  );
+  await expect(composer).toBeFocused();
+});
+
+test('sign-in dialog fits narrow light and dark views', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 600 });
+  await page.goto('/?fixture&authFixture');
+  for (const theme of ['Light', 'Dark']) {
+    await page.getByRole('radio', { name: theme, exact: true }).check();
+    await page.getByRole('button', { name: 'Sign in / sign up' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByLabel('Email')).toBeFocused();
+    expect(
+      await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
+    ).toBe(true);
+    const box = (await dialog.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+    await page.keyboard.press('Escape');
+  }
 });

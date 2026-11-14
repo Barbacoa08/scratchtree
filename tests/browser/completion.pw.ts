@@ -123,7 +123,7 @@ test('completion failure has its own narrow retry, preserving capture and latest
   await page.evaluate(() => {
     const t = (window as any).__test;
     const b = JSON.parse(t.repo.exported);
-    if (b.version !== 7 || b.library.items[0].done !== true)
+    if (b.version !== 8 || b.library.items[0].done !== true)
       throw Error('completion absent');
     t.repo.restoreText = t.repo.exported;
   });

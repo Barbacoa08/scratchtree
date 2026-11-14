@@ -3,7 +3,11 @@ import { MemoryRepository } from '../fixtures/memory';
 import { item } from '../fixtures/items';
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { validateBackup, encodeBackup } from '../../src/lib/domain/backup';
+import {
+  validateBackup,
+  encodeBackup,
+  backupFixture,
+} from '../fixtures/backup';
 import {
   MAX_SOURCE,
   MAX_ENVELOPE,
@@ -29,15 +33,10 @@ const snapshot = (): WorkspaceSnapshot => ({
   undoDeleteIds: [deleted],
 });
 const valid = () => JSON.parse(encodeBackup(snapshot()));
-describe('strict version-7 library backup', () => {
+describe('strict version-8 library backup', () => {
   it('exports only the new library envelope and roundtrips every source-bearing tree field', () => {
     const b = valid();
-    expect(b).toEqual({
-      format: 'scratchtree-alpha',
-      version: 7,
-      exportedAt: expect.any(String),
-      library: snapshot(),
-    });
+    expect(b).toEqual(backupFixture(snapshot()));
     expect(validateBackup(JSON.stringify(b))).toEqual(b);
   });
   it.each([
@@ -63,9 +62,9 @@ describe('strict version-7 library backup', () => {
     'duplicateCase',
   ])('rejects %s without normalizing', (kind) => {
     const b = valid(),
-      s = b.library;
+      s = { ...b.library, ...b.device };
     if (kind === 'format') b.format = 'unrecognized-alpha';
-    if (kind === 'version') b.version = 8;
+    if (kind === 'version') b.version = 7;
     if (kind === 'kind') s.items[0].kind = 'branch';
     if (kind === 'duplicate') s.items.push(s.items[0]);
     if (kind === 'draftDuplicate') s.drafts.push(s.drafts[0]);
@@ -77,15 +76,15 @@ describe('strict version-7 library backup', () => {
     if (kind === 'rank')
       s.items.push(item({ id: '33333333-3333-4333-8333-333333333333' }));
     if (kind === 'restore') s.items[1].restoreParentId = id;
-    if (kind === 'missing') delete s.undoDeleteIds;
+    if (kind === 'missing') delete b.device.undoDeleteIds;
     if (kind === 'type') s.items[0].createdAt = '1';
     if (kind === 'timestamp') b.exportedAt = '2026-02-30T00:00:00.000Z';
     if (kind === 'extra') b.machinePath = '/private';
     if (kind === 'oversizeField')
       s.items[0].markdown = 'x'.repeat(MAX_SOURCE + 1);
-    if (kind === 'undoActive') s.undoDeleteIds = [id];
+    if (kind === 'undoActive') b.device.undoDeleteIds = [id];
     if (kind === 'undoDuplicate') s.undoDeleteIds.push(deleted);
-    if (kind === 'undoCase') s.undoDeleteIds = [deleted.toLowerCase()];
+    if (kind === 'undoCase') b.device.undoDeleteIds = [deleted.toLowerCase()];
     if (kind === 'draftCase') s.drafts[0].key = id.toLowerCase();
     if (kind === 'duplicateCase')
       s.items.push({ ...s.items[0], id: id.toLowerCase() });
@@ -98,9 +97,9 @@ describe('strict version-7 library backup', () => {
     expect(validateBackup('{')).toHaveProperty('code');
     expect(validateBackup(' '.repeat(MAX_ENVELOPE + 1))).toHaveProperty('code');
   });
-  it('shares exact synthetic source, independent Trash descendants, and ordered group Undo with Rust', () => {
+  it('shares exact synthetic source, independent Trash descendants, and ordered group Undo', () => {
     const text = readFileSync(
-      new URL('../fixtures/valid-v7.json', import.meta.url),
+      new URL('../fixtures/valid-v8.json', import.meta.url),
       'utf8',
     );
     expect(validateBackup(text)).toEqual(JSON.parse(text));
@@ -145,10 +144,10 @@ it('rejected replacement retains the existing library and source buffer', async 
 
 it('uses the last repeated envelope and nested field before strict validation', () => {
   const text =
-    '{"format":"discarded","format":"scratchtree-alpha","version":0,"version":7,"exportedAt":"2026-11-13T00:00:00.000Z","library":{"items":[{"id":"11111111-1111-4111-8111-111111111111","parentId":null,"kind":"note","kind":"tree","markdown":"discarded","markdown":"kept","done":false,"done":true,"color":null,"position":0,"createdAt":1,"updatedAt":2,"deletedAt":null,"restoreParentId":null,"restoreIndex":null}],"drafts":[],"undoDeleteIds":[]}}';
+    '{"format":"discarded","format":"scratchtree","version":0,"version":8,"exportedAt":"2026-11-13T00:00:00.000Z","library":{"items":[{"id":"11111111-1111-4111-8111-111111111111","parentId":null,"kind":"note","kind":"tree","markdown":"discarded","markdown":"kept","done":false,"done":true,"color":null,"position":0,"createdAt":1,"updatedAt":2,"deletedAt":null,"restoreParentId":null,"restoreIndex":null}],"purgedIds":[]},"device":{"drafts":[],"undoDeleteIds":[],"recovery":[]}}';
   expect(validateBackup(text)).toEqual({
-    format: 'scratchtree-alpha',
-    version: 7,
+    format: 'scratchtree',
+    version: 8,
     exportedAt: '2026-11-13T00:00:00.000Z',
     library: {
       items: [
@@ -161,9 +160,9 @@ it('uses the last repeated envelope and nested field before strict validation', 
           updatedAt: 2,
         }),
       ],
-      drafts: [],
-      undoDeleteIds: [],
+      purgedIds: [],
     },
+    device: { drafts: [], undoDeleteIds: [], recovery: [] },
   });
   expect(
     validateBackup(
@@ -184,9 +183,9 @@ it('previews every saved note exactly once with trees as an included subtotal', 
   expect(repo.snapshot.items).toHaveLength(0);
 });
 
-describe('raw JSON input parity with native backup validation', () => {
+describe('current raw JSON input policy', () => {
   const text = readFileSync(
-    new URL('../fixtures/valid-v7.json', import.meta.url),
+    new URL('../fixtures/valid-v8.json', import.meta.url),
     'utf8',
   );
   it.each([
@@ -199,11 +198,11 @@ describe('raw JSON input parity with native backup validation', () => {
       validateBackup(text.replace('2026-11-13T00:00:00.000Z', date)),
     ).toHaveProperty('code', 'invalid_backup');
   });
-  it.each(['7.0', '7e0'])(
+  it.each(['8.0', '8e0'])(
     'accepts integral version %s without changing source',
     (version) => {
       expect(
-        validateBackup(text.replace('"version": 7', `"version": ${version}`)),
+        validateBackup(text.replace('"version": 8', `"version": ${version}`)),
       ).toEqual(JSON.parse(text));
     },
   );
@@ -219,7 +218,7 @@ describe('raw JSON input parity with native backup validation', () => {
     expect(checked).toEqual(JSON.parse(raw));
     if ('code' in checked) throw new Error(checked.code);
     expect(checked.library.items[0].markdown).toBe('**note 1**\r\nline\n');
-    expect(checked.library.drafts[0]).toMatchObject({
+    expect(checked.device.drafts[0]).toMatchObject({
       markdown: 'unsaved\r\n',
       revision: 9007199254740991,
     });

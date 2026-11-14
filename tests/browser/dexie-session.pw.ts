@@ -15,6 +15,11 @@ const code = ts.transpileModule(
 ).outputText;
 for (const scenario of [
   'cold',
+  'transport-replacement',
+  'local-journal-cap',
+  'expired-overflow',
+  'expired-token-overflow',
+  'ordinary-export',
   'queued-retry-complete',
   'queued-retry-interrupted',
   'switch-preservation',

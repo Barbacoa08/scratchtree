@@ -33,12 +33,14 @@ export type SyncState = {
   lastConfirmed: number | null;
   detail: string | null;
   recoveries: number;
-  overflow?: { items: number };
+  readOnlyRecovery?: boolean;
+  overflow?: { items: number; correctable?: boolean };
 };
 export type SyncPort = {
   subscribe(listener: (s: SyncState) => void): () => void;
   retry(): Promise<void>;
   exportRecovery(): Promise<void>;
+  exportOverflow(): Promise<void>;
   inspectOverflow?(): Promise<{
     epoch: string;
     overflow: boolean;

@@ -91,7 +91,7 @@
           : `Last confirmed: ${new Date(value.lastConfirmed).toLocaleString()}`}
       </p>
       {#if value.detail}<p>{value.detail}</p>{/if}
-      {#if value.state === 'needs-sync'}<button
+      {#if value.state === 'needs-sync' && !value.readOnlyRecovery}<button
           disabled={busy}
           onclick={() => void perform(() => sync.retry())}>Retry sync</button
         >{/if}
@@ -101,12 +101,17 @@
             : 'items'}
         </p>
       {/if}
-      {#if value.recoveries > 0 || value.overflow}<button
+      {#if value.recoveries > 0}<button
           disabled={busy}
           onclick={() => void perform(() => sync.exportRecovery())}
           >Export recovery</button
         >{/if}
-      {#if value.overflow && sync.inspectOverflow && sync.purgeOverflow}<button
+      {#if value.overflow}<button
+          disabled={busy}
+          onclick={() => void perform(() => sync.exportOverflow())}
+          >Export full raw library</button
+        >{/if}
+      {#if value.overflow && value.overflow.correctable !== false && sync.inspectOverflow && sync.purgeOverflow}<button
           disabled={busy}
           onclick={() =>
             void perform(async () => {

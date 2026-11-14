@@ -92,11 +92,13 @@
 >
   <h2 id="raw-recovery-title">Recover merged notes</h2>
   <p>
-    Export recovery before removing notes. Removal here is permanent and syncs
-    to your other Macs.
+    Export the full raw library before removing notes. Removal here is permanent
+    and syncs to your other Macs.
   </p>
   {#if !inspection.overflow}<p>
-      The library is within its limits. Continue editing normally.
+      The shared library is within its limits. Close this dialog. If your notes
+      are still loading, choose Retry loading library. Your drafts and recovery
+      may still exceed this Mac’s capacity.
     </p>{/if}
   {#if !inspection.rows.length}<p>No raw notes remain.</p>{:else}
     <fieldset disabled={pending || !inspection.overflow}>

@@ -151,6 +151,11 @@ export async function run(which: string) {
       files: {
         ...files,
         chooseRead: async () => input,
+        chooseRecoveryWrite: async (chunks) => {
+          exported = '';
+          for await (const chunk of chunks) exported += chunk;
+          return 'saved';
+        },
         chooseWrite: async (text) => {
           exported = text;
           return 'saved';
@@ -216,6 +221,94 @@ export async function run(which: string) {
   try {
     await load();
     await capture('local');
+    if (which === 'local-journal-cap') {
+      const epoch = (await local.libraries.get('local'))!.epoch;
+      // Existing never-bound profile at the former operation ceiling. Keep one
+      // unacknowledged command plus one locally applied but unwitnessed command.
+      await local.pending.clear();
+      await local.witnesses.clear();
+      await local.device.where('key').startsWith('source-head:').delete();
+      const pending = Array.from({ length: 1000 }, (_, n) => ({
+        id: crypto.randomUUID(),
+        epoch,
+        sequence: n + 1,
+        recordedAt: n + 1,
+        fingerprint: 'a'.repeat(64),
+        digest: 'b'.repeat(64),
+        expected: { items: [], orders: [], purgedIds: [] },
+        command: { kind: 'setItemDone' as const, id, done: !!(n % 2) },
+        localApplied: n !== 0,
+      }));
+      await local.pending.bulkAdd(pending);
+      await local.witnesses.bulkAdd(
+        pending.slice(2).map(({ id, epoch, digest, recordedAt }) => ({
+          id,
+          epoch,
+          digest,
+          recordedAt,
+        })),
+      );
+      await local.device.put({ key: 'intent-sequence', value: 1000 });
+      s.close();
+      s = await open();
+      observe();
+      await load();
+      for (let n = 0; n < 5; n++) await edit('saved revision ' + (1001 + n));
+      assert(
+        (await local.pending.count()) === 2 &&
+          (await local.pending.get(pending[0].id)) &&
+          (await local.pending.get(pending[1].id)),
+        'retain only uncertain or unwitnessed operations',
+      );
+      s.close();
+      s = await open();
+      observe();
+      assert(
+        (await load()).items[0].markdown === 'saved revision 1005',
+        'local completion survives reopen',
+      );
+      await sign();
+      assert(
+        state.phase === 'signed-in' &&
+          (await remote.notes.get([epoch, id]))?.markdown ===
+            'saved revision 1005',
+        'seed exact completed local state',
+      );
+      assert(
+        (await remote.pending.get(pending[0].id)) &&
+          (await remote.pending.get(pending[1].id)) &&
+          !(await remote.witnesses.get(pending[1].id)),
+        'unapplied local operation remains recoverable',
+      );
+      return 'ok';
+    }
+    if (which === 'ordinary-export') {
+      const epoch = (await local.libraries.get('local'))!.epoch;
+      await local.recovery.add({
+        id: crypto.randomUUID(),
+        kind: 'draft',
+        draftKey: id,
+        originEpoch: epoch,
+        reason: 'rejected',
+        markdown: 'only this alternative',
+        recordedAt: 1,
+      });
+      await capture('unrelated private synthetic text', other);
+      await s.sync.exportRecovery();
+      const ordinary = JSON.parse(exported);
+      assert(
+        ordinary.format === 'scratchtree-recovery' &&
+          ordinary.recovery.some(
+            (r: { markdown: string }) => r.markdown === 'only this alternative',
+          ) &&
+          !exported.includes('unrelated private synthetic text') &&
+          !('notes' in ordinary) &&
+          !('pending' in ordinary) &&
+          !('journal' in ordinary),
+        'ordinary recovery excludes unrelated library and journal',
+      );
+      return 'ok';
+    }
     if (which === 'cold') {
       s.close();
       s = await open();
@@ -514,6 +607,128 @@ export async function run(which: string) {
       }
       return 'ok';
     }
+    if (which === 'expired-overflow' || which === 'expired-token-overflow') {
+      s.close();
+      user.isLoggedIn = which === 'expired-token-overflow';
+      if (user.isLoggedIn)
+        Object.assign(user, {
+          accessToken: 'expired-synthetic-token',
+          accessTokenExpiration: new Date(0),
+        });
+      const template = (await remote.notes.get([epoch, id]))!;
+      await remote.notes.bulkAdd(
+        Array.from({ length: 11 }, () => ({
+          ...template,
+          id: crypto.randomUUID(),
+          markdown: 'z'.repeat(1024 * 1024),
+        })),
+      );
+      const traffic = { pulls, fetches, logouts };
+      const connections = constructs;
+      const activation = JSON.stringify(
+        (await local.device.get('session-activation'))?.value,
+      );
+      s = await open();
+      observe();
+      await s.sync.retry();
+      await s.sync.exportOverflow();
+      assert(
+        JSON.parse(exported).notes.length === 12,
+        'first recovery export complete',
+      );
+      s.close();
+      s = await open();
+      observe();
+      await s.sync.retry();
+      let fenced = false;
+      try {
+        await s.sync.purgeOverflow!({ epoch, ids: [id] });
+      } catch {
+        fenced = true;
+      }
+      assert(fenced, 'expired recovery cannot purge the bound cache');
+      await s.sync.exportOverflow();
+      const raw = JSON.parse(exported);
+      assert(
+        raw.format === 'scratchtree-raw-recovery' &&
+          raw.notes.length === 12 &&
+          raw.epoch === epoch,
+        'expired cache can export every raw row',
+      );
+      assert(
+        constructs === connections + 2 &&
+          JSON.stringify(traffic) ===
+            JSON.stringify({ pulls, fetches, logouts }) &&
+          JSON.stringify(
+            (await local.device.get('session-activation'))?.value,
+          ) === activation &&
+          (await remote.notes.count()) === 12,
+        'recovery preserves attached binding without transport or logout',
+      );
+      return 'ok';
+    }
+    if (which === 'transport-replacement') {
+      s.close();
+      failAuto = true;
+      s = await open();
+      observe();
+      const c = new WorkspaceController(s.repository);
+      s.attachController(c);
+      try {
+        await c.start();
+        await c.refreshFromRepository();
+        await c.selectNote(id);
+        const entered = latch(),
+          proceed = latch(),
+          rebound = latch();
+        const original = s.repository.refreshFromRemote!;
+        let intercept = true;
+        s.repository.refreshFromRemote = async (buffers) => {
+          if (intercept) {
+            intercept = false;
+            entered.release();
+            await proceed.wait;
+          }
+          return original(buffers);
+        };
+        c.editSource('uncheckpointed E1 input');
+        const refreshing = c.refreshFromRepository();
+        await entered.wait;
+        const queued = c.setNoteDone(id, true);
+        failAuto = false;
+        onReopen = (previous, next) => {
+          next.on('ready', async () => {
+            await seedRemote('E2 winner', 'next-epoch');
+          });
+          previous.on('close', rebound.release);
+        };
+        const retry = s.sync.retry();
+        await rebound.wait;
+        proceed.release();
+        await Promise.all([refreshing, queued, retry]);
+        await c.refreshFromRepository();
+        const replacement = await remote.notes.get(['next-epoch', id]);
+        assert(
+          c.state.activeKey === 'compose' &&
+            replacement?.markdown === 'E2 winner' &&
+            !replacement.done,
+          'handoff fences queued E1 command and resets same-ID editor',
+        );
+        assert(
+          (await remote.recovery.toArray()).some(
+            (r) =>
+              r.kind === 'draft' &&
+              r.draftKey === id &&
+              r.originEpoch === epoch &&
+              r.markdown === 'uncheckpointed E1 input',
+          ),
+          'dirty E1 source archived before replacement',
+        );
+      } finally {
+        c.dispose();
+      }
+      return 'ok';
+    }
     if (which === 'expired-cold') {
       s.close();
       user.isLoggedIn = false;
@@ -561,6 +776,8 @@ export async function run(which: string) {
       return 'ok';
     }
     if (which === 'head' || which === 'sequence') {
+      // Generate the original server obligation after binding the account.
+      await edit('first account-bound source');
       const capture = (await remote.pending.toArray())[0];
       await edit('second');
       const saved = (await remote.pending.toArray()).find(
@@ -800,7 +1017,7 @@ export async function run(which: string) {
       assert(
         exported.includes('saveItemSource') &&
           exported.includes('detached-conflict'),
-        'raw export retains exact archived command across a second logout',
+        'ordinary recovery retains exact archived command across a second logout',
       );
     }
     return 'ok';

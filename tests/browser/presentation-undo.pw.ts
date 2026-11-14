@@ -279,10 +279,11 @@ test('document selection, palette, modal, busy state, and focused controls retai
   expect(await marker(page)).toEqual([ids[0]]);
   await page.evaluate(() => {
     (window as any).__test.repo.restoreText = JSON.stringify({
-      format: 'scratchtree-alpha',
-      version: 7,
+      format: 'scratchtree',
+      version: 8,
       exportedAt: '2026-11-12T00:00:00.000Z',
-      library: { items: [], drafts: [], undoDeleteIds: [] },
+      library: { items: [], purgedIds: [] },
+      device: { drafts: [], undoDeleteIds: [], recovery: [] },
     });
   });
   await page

@@ -15,6 +15,10 @@ const fixture = ts.transpileModule(
 ).outputText;
 for (const scenario of [
   'refresh',
+  'device-capacity',
+  'retired-export',
+  'retired-marker-export',
+  'adoptable-input',
   'receipts',
   'purge',
   'transfer',

@@ -1,6 +1,6 @@
 # Open discussions
 
-These are product decisions for future discussion, not authorization to implement them. The accepted foundation remains local-first Markdown editing with visible syntax, SvelteKit, Svelte, CodeMirror, Tauri, and native SQLite. Current behavior and technical contracts live in [README.md](README.md) and [AGENTS.md](AGENTS.md). Technical defects and evidence limits should be tracked separately from these product choices.
+These are product decisions for future discussion, not authorization to implement them. The accepted foundation remains local-first Markdown editing with visible syntax, SvelteKit, Svelte, CodeMirror, Tauri, Dexie persistent IndexedDB, and Dexie Cloud. Current behavior and technical contracts live in [README.md](README.md) and [AGENTS.md](AGENTS.md). Technical defects and evidence limits should be tracked separately from these product choices.
 
 When a topic becomes actionable, link its individual GitHub issue here. Record a decision in the appropriate current guidance and mark the topic resolved instead of duplicating accepted policy indefinitely.
 
@@ -12,7 +12,7 @@ The rename uses a new native identity and current-only storage/backup contracts.
 
 ## Styling experiment
 
-The current interface uses locally authored CSS; no styling library is selected. Compare it with an experiment using `@barbajoe/css-lib`, including interaction fidelity and maintenance costs, before deciding whether adoption helps.
+The desktop interface uses locally authored CSS; no desktop styling library is selected. The separate landing page uses `@barbajoe/css-lib`. Compare it with an experiment using `@barbajoe/css-lib`, including interaction fidelity and maintenance costs, before deciding whether adoption helps.
 
 ## Cross-parent movement
 
@@ -44,9 +44,11 @@ Manual Delete inside Trash permanently removes the selected item and its childre
 
 ## Accounts and synchronization
 
-**Dexie Cloud is selected for the next synchronization implementation.** Start with one personal library across Macs, local-first access, and no signup or login screens. Devices still need private authorization. Unfinished composer drafts stay on each Mac; submitted notes, tree structure, colors, completion, and Trash sync. Deletion Undo stays local to the Mac where deletion occurred; either Mac can restore from shared Trash. Full backup restore replaces the shared library on all Macs; older offline edits must remain recoverable rather than automatically reappearing. An acknowledged current library on the server is sufficient initially; version history is deferred. Simple last-write-wins for note source is acceptable.
+**Accepted:** Dexie Cloud, one personal library across Macs, local-first access, and existing-account email/code sign-in. The initial private alpha has no public sign-up; a server-side allowed-email check precedes OTP, and Dexie enforces account access. Sign-out retains local notes and stops transport. Submitted notes, tree structure/order, colors, completion, and Trash sync; drafts, Undo, editor history, preferences, and recovery stay on each Mac. Restore replaces the shared library, and older offline edits are recovered rather than automatically added back. Current-server synchronization is sufficient; version history remains deferred.
 
-The current released app remains local-only and uses native SQLite. **The accepted sync architecture replaces SQLite with Dexie persistent IndexedDB behind the Repository boundary; no SQLite-to-Dexie bridge is planned.** The new release need not support older storage or backup formats. Keep backup conversion in a separate local-only tool, with an unchanged source backup, validated output, and synthetic round-trip tests against the latest published pre-sync release. The Dexie experiment is a starting point, not a complete Repository implementation or a verified native storage replacement. The converter is not implemented yet; its output contract will follow the new synchronized model. Validate managed-cloud behavior, local backup conversion/import from the latest published pre-sync release, native Dexie persistence, concurrent hierarchy/ordering, rejected-edit recovery, Trash/purge/restore, and Undo before integrating. Initial device setup, precise concurrency rules, and the mechanisms for safe shared replacement and recovery remain design decisions. The right panel should present concise sync status, distinguish local saves from server acknowledgment, and expose offline/error details without implying success from connectivity alone.
+Current source replaces native SQLite with persistent Dexie behind Repository and uses current-only BackupV8. Previous release backups use a separate local conversion/transfer procedure, not an app migration ladder. The published alpha.5 remains local-only until a separately authorized release. Source implementation, managed/browser proofs, packaged native acceptance, actual-note transfer, and publication are separate gates.
+
+Still to discuss: public registration/invitations and multi-user access, account management beyond this private alpha, historical/versioned backup, and any future sharing. Mobile sync follows the same library once phone scope and platform acceptance are decided. The right pane uses concise current-library status with expanded confirmation/recovery details; connectivity alone does not imply success.
 
 ## Mobile companions
 

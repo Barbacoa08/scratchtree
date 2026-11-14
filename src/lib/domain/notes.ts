@@ -43,12 +43,6 @@ export interface WorkspaceSnapshot {
   drafts: Draft[];
   undoDeleteIds: string[];
 }
-export interface BackupV7 {
-  format: 'scratchtree-alpha';
-  version: 7;
-  exportedAt: string;
-  library: WorkspaceSnapshot;
-}
 export const emptyWorkspace = (): WorkspaceSnapshot => ({
   items: [],
   drafts: [],

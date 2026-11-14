@@ -45,7 +45,7 @@
     type MouseSelection,
   } from '../workspace/mouse-selection';
   import { WorkspaceController, type ViewState } from '../workspace/controller';
-  import { nativeRepository, type Repository } from '../platform/workspace';
+  import type { Repository } from '../platform/workspace';
   import { copyMarkdown, openExternal } from '../platform/actions';
   import { filterNotes } from '../domain/search';
   import { timestampPresentation } from '../domain/timestamps';
@@ -53,7 +53,7 @@
   import { nativeCloseAdapter } from '../platform/native-lifecycle';
   import { attachMouseHistory } from '../platform/mouse-history';
   let {
-    repository = nativeRepository,
+    repository,
     auth,
     sync,
     onready,
@@ -61,7 +61,7 @@
     appearance = 'system',
     onappearancechange = () => {},
   }: {
-    repository?: Repository;
+    repository: Repository;
     auth?: AuthPort;
     sync?: SyncPort;
     windowAdapter?: CloseAdapter;
@@ -88,6 +88,8 @@
   let recoveryModal = $state(false);
   let authTrigger = $state<HTMLButtonElement>();
   let dialogWasOpen = false;
+  let signOutError = $state<string | null>(null);
+  let signOutRetry = $state<HTMLButtonElement>();
   const controller = new WorkspaceController(untrack(() => repository));
   let viewState: ViewState = $state(controller.state);
   let mouseSelection = $state<MouseSelection>(emptyMouseSelection());
@@ -322,6 +324,7 @@
       closeFailed ||
       !!moveSession ||
       authState.open ||
+      authState.phase === 'signing-out' ||
       recoveryModal,
   );
   let blocked = $derived(
@@ -463,6 +466,19 @@
   onMount(() => {
     const unsubscribeAuth = auth?.subscribe((next) => {
       const closed = dialogWasOpen && !next.open;
+      if (authState.phase === 'signing-out' && next.phase !== 'signing-out') {
+        signOutError = next.authenticated ? next.error : null;
+        void tick().then(() => {
+          if (
+            !blocked &&
+            (document.activeElement === document.body ||
+              document.activeElement === authTrigger)
+          ) {
+            if (signOutError) signOutRetry?.focus();
+            else authTrigger?.focus();
+          }
+        });
+      } else if (next.phase === 'signing-out') signOutError = null;
       dialogWasOpen = next.open;
       authState = next;
       if (closed) void tick().then(() => authTrigger?.focus());
@@ -1628,8 +1644,12 @@
       stream?.focus();
     }
   }
-  function toggleDetails() {
-    if (detailsOpen && detailsRail?.contains(document.activeElement))
+  function toggleDetails(event: MouseEvent) {
+    // Real pointer activation owns focus; synthetic toggles retain newer focus.
+    if (
+      event.detail > 0 ||
+      (detailsOpen && detailsRail?.contains(document.activeElement))
+    )
       detailsToggle?.focus();
     detailsChoice = !detailsOpen;
     detailsOpen = detailsChoice;
@@ -1807,8 +1827,18 @@
     <section aria-label="Library loading">
       <p role="status">{viewState.status}</p>
       {#if viewState.error}<p role="alert">{viewState.error}</p>
-        <button onclick={() => controller.start()}>Retry loading library</button
-        >{/if}
+        {#if !syncState.readOnlyRecovery}<button
+            onclick={() => controller.start()}>Retry loading library</button
+          >{/if}
+      {/if}
+      {#if sync && (syncState.overflow || syncAttention)}
+        <SyncStatus
+          {sync}
+          value={syncState}
+          onattentionchange={(active) => (syncAttention = active)}
+          onmodalchange={(active) => (recoveryModal = active)}
+        />
+      {/if}
     </section>
   {:else}
     <div class="workspace" class:details-open={detailsOpen}>
@@ -1874,6 +1904,7 @@
               !authState.configured ||
               authState.phase === 'signing-out' ||
               blocked}
+            data-unavailable={!auth || !authState.configured ? '' : undefined}
             title={!auth || !authState.configured
               ? 'Sign in is not configured'
               : undefined}
@@ -1894,6 +1925,18 @@
             ><Icon name="account" />
             {authState.authenticated ? 'Sign out' : 'Sign in / sign up'}</button
           >
+          {#if authState.phase === 'signing-out'}
+            <p role="status">Signing out…</p>
+          {/if}
+          {#if signOutError && !authState.open}
+            <p role="alert">{signOutError}</p>
+            <button
+              type="button"
+              bind:this={signOutRetry}
+              disabled={blocked}
+              onclick={() => void auth?.signOut()}>Retry sign out</button
+            >
+          {/if}
           {#if !auth || !authState.configured}<span
               id="auth-unavailable"
               class="auth-unavailable">Sign in is not configured.</span

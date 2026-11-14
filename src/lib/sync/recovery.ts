@@ -8,8 +8,7 @@ import {
   readJournalMetadata,
 } from './intents';
 import { encodeCloudBackup, type RecoveryRecord } from './backup';
-import type { Confirmation, SharedEnvelope } from './confirmation';
-import { projectLibrary } from './canonical';
+import type { Confirmation } from './confirmation';
 import { applicationFields } from './confirmation';
 /** Resolve only an unchanged captured intent, atomically retaining a rejected alternative. */
 export async function resolveIntent(
@@ -217,16 +216,34 @@ export async function resolveIntent(
     )
     .finally(() => signal?.removeEventListener('abort', onAbort));
 }
+export async function ordinaryRecovery(db: ScratchtreeDatabase) {
+  return db.transaction('r', [db.recovery, db.device], async () => ({
+    format: 'scratchtree-recovery' as const,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    recovery: await db.recovery.toArray(),
+    archived: await readArchive(db),
+    buffers: await readRawBuffers(db),
+  }));
+}
 export interface RawRecovery {
   format: 'scratchtree-raw-recovery';
   version: 1;
   exportedAt: string;
   libraryId: string;
   epoch: string;
+  retired?: {
+    epoch: string;
+    notes: unknown[];
+    orders: unknown[];
+    purges: unknown[];
+    lastValid: import('../domain/notes').WorkspaceSnapshot;
+  };
   notes: unknown[];
   orders: unknown[];
   purges: unknown[];
   drafts: unknown[];
+  undo: import('./database').UndoRow[];
   pending: PendingIntent[];
   recovery: RecoveryRecord[];
   buffers: RawBuffer[];
@@ -246,6 +263,7 @@ export async function rawRecovery(
       db.orders,
       db.purges,
       db.drafts,
+      db.undo,
       db.pending,
       db.recovery,
       db.device,
@@ -254,22 +272,44 @@ export async function rawRecovery(
       const pointer = await db.libraries.get(libraryId);
       if (!pointer) throw new Error('The library is unavailable.');
       const epoch = pointer.epoch;
+      const marker = (await db.device.get(`library-view:${libraryId}`))
+        ?.value as
+        | {
+            epoch: string;
+            snapshot: import('../domain/notes').WorkspaceSnapshot;
+          }
+        | undefined;
+      const rows = async (forEpoch: string) => ({
+        notes: (await db.notes.where('epoch').equals(forEpoch).toArray()).map(
+          applicationFields,
+        ),
+        orders: (await db.orders.where('epoch').equals(forEpoch).toArray()).map(
+          applicationFields,
+        ),
+        purges: (await db.purges.where('epoch').equals(forEpoch).toArray()).map(
+          applicationFields,
+        ),
+      });
+      // A rejected replacement never commits its retired recovery record. Both
+      // the old rows and the last valid snapshot can still hold distinct input.
+      const retired =
+        marker && marker.epoch !== epoch
+          ? {
+              epoch: marker.epoch,
+              ...(await rows(marker.epoch)),
+              lastValid: marker.snapshot,
+            }
+          : undefined;
       return {
         format: 'scratchtree-raw-recovery',
         version: 1,
         exportedAt: new Date().toISOString(),
         libraryId,
         epoch,
-        notes: (await db.notes.where('epoch').equals(epoch).toArray()).map(
-          applicationFields,
-        ),
-        orders: (await db.orders.where('epoch').equals(epoch).toArray()).map(
-          applicationFields,
-        ),
-        purges: (await db.purges.where('epoch').equals(epoch).toArray()).map(
-          applicationFields,
-        ),
+        ...(retired ? { retired } : {}),
+        ...(await rows(epoch)),
         drafts: await db.drafts.toArray(),
+        undo: await db.undo.toArray(),
         pending: await db.pending.toArray(),
         recovery: await db.recovery.toArray(),
         buffers: await readRawBuffers(db),
@@ -279,32 +319,6 @@ export async function rawRecovery(
     },
   );
 }
-export async function rawViewValid(db: ScratchtreeDatabase, libraryId: string) {
-  const raw = await rawRecovery(db, libraryId);
-  if (raw.buffers.length) throw new Error('Raw input needs recovery adoption.');
-  const view = projectLibrary(
-    raw.notes as Parameters<typeof projectLibrary>[0],
-    raw.orders as Parameters<typeof projectLibrary>[1],
-    raw.purges as Parameters<typeof projectLibrary>[2],
-    raw.epoch,
-  );
-  encodeCloudBackup({
-    library: { items: view.items, purgedIds: view.purgedIds },
-    device: { drafts: [], undoDeleteIds: [], recovery: [] },
-  });
-  return {
-    ...view,
-    shared: {
-      epoch: raw.epoch,
-      notes: raw.notes,
-      orders: raw.orders,
-      purges: raw.purges,
-    } as SharedEnvelope,
-    pendingCount: raw.pending.length,
-    recoveries: raw.recovery.length,
-  };
-}
-
 /** Shared deletion is requested once; only server absence releases its local retry marker. */
 export async function cleanupResolvedWitness(
   db: ScratchtreeDatabase,
@@ -355,7 +369,7 @@ export async function cleanupResolvedWitness(
 
 /** Row-wise JSON keeps native IPC chunks bounded, including supplementary Unicode. */
 export async function* recoveryChunks(
-  raw: RawRecovery,
+  raw: RawRecovery | Awaited<ReturnType<typeof ordinaryRecovery>>,
 ): AsyncGenerator<string> {
   function* fragments() {
     yield '{';

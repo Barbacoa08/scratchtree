@@ -1,5 +1,6 @@
+import { backupFixture } from '../fixtures/backup';
 import { describe, expect, it, vi } from 'vitest';
-import { encodeBackup, validateBackup } from '../../src/lib/domain/backup';
+import { encodeBackup, validateBackup } from '../fixtures/backup';
 import { validateSnapshot } from '../../src/lib/domain/validation';
 import {
   MAX_ENVELOPE,
@@ -88,7 +89,7 @@ describe('format-neutral snapshot policy', () => {
       before = structuredClone(s);
     expect(validateSnapshot(s)).toEqual(before);
     expect(s).toEqual(before);
-    expect(validateBackup(encodeBackup(s))).toHaveProperty('library', before);
+    expect(validateBackup(encodeBackup(s))).toEqual(backupFixture(before));
   });
   it('rejects unknown fields and exact-case dangling references without mutating input', () => {
     const s = snapshot();
@@ -254,9 +255,16 @@ describe('strict current-only portable cloud backup', () => {
     rejected(b);
   });
   it('rejects old backups, malformed JSON, and oversized raw input', () => {
-    expect(validateCloudBackup(encodeBackup(snapshot()))).toHaveProperty(
-      'code',
-    );
+    expect(
+      validateCloudBackup(
+        JSON.stringify({
+          format: 'scratchtree-alpha',
+          version: 7,
+          exportedAt,
+          library: snapshot(),
+        }),
+      ),
+    ).toHaveProperty('code');
     expect(validateCloudBackup('{')).toHaveProperty('code');
     expect(validateCloudBackup(' '.repeat(MAX_ENVELOPE + 1))).toHaveProperty(
       'code',

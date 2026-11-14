@@ -12,6 +12,7 @@ import {
   cleanupResolvedWitness,
   resolveIntent,
   rawRecovery,
+  retainRawBuffers,
 } from '../../src/lib/sync/recovery';
 const id = '00000000-0000-4000-8000-000000000001';
 function serial() {
@@ -136,6 +137,188 @@ export async function run(scenario: string) {
       draft: { key: 'compose', revision: 0 },
     });
     const epoch = await repo.getEpoch();
+    if (scenario === 'retired-export' || scenario === 'retired-marker-export') {
+      const template = (await db.notes.get([epoch, id]))!;
+      const marked = 'last acknowledged E1'.padEnd(1024 * 1024, 'm');
+      const latest = 'retired E1 rows'.padEnd(1024 * 1024, 'r');
+      const incoming = 'current E2'.padEnd(1024 * 1024, 'c');
+      const rows = Array.from({ length: 6 }, () => ({
+        ...template,
+        id: crypto.randomUUID(),
+        markdown: marked,
+      }));
+      await db.notes.bulkAdd(rows);
+      await repo.loadWorkspace();
+      const fallback = scenario === 'retired-marker-export';
+      await db.notes.bulkPut(
+        rows.map((r) => ({
+          ...r,
+          markdown: latest,
+          ...(fallback ? { color: 'invalid' as never } : {}),
+        })),
+      );
+      const next = crypto.randomUUID();
+      await db.notes.bulkAdd(
+        rows.map((r) => ({ ...r, epoch: next, markdown: incoming })),
+      );
+      await db.libraries.put({ id: repo.libraryId, epoch: next });
+      // Another library's marker and epoch have no relationship to the active account.
+      await db.device.put({
+        key: 'library-view:other',
+        value: {
+          epoch: 'other',
+          snapshot: { items: [{ markdown: 'unrelated account text' }] },
+        },
+      });
+      await db.notes.put({
+        ...template,
+        epoch: 'other',
+        markdown: 'unrelated account text',
+      });
+      let failed = false;
+      try {
+        await repo.loadWorkspace();
+      } catch {
+        failed = true;
+      }
+      assert(
+        failed &&
+          !(await db.recovery.toArray()).some(
+            (r) => r.kind === 'library' && r.originEpoch === epoch,
+          ),
+        'retired archive has not committed',
+      );
+      let exported = '';
+      const engine = new SyncEngine({
+        db,
+        repository: repo,
+        files: {
+          ...files,
+          chooseRecoveryWrite: async (chunks) => {
+            exported = '';
+            for await (const chunk of chunks) exported += chunk;
+            return 'saved';
+          },
+        },
+        serialize: serial(),
+        onInvalidation: () => {},
+      });
+      try {
+        await engine.exportRecovery();
+        assert(
+          !exported.includes('last acknowledged E1') &&
+            !exported.includes('retired E1 rows') &&
+            !exported.includes('current E2'),
+          'ordinary export stays narrow',
+        );
+        await engine.exportOverflow();
+        const raw = JSON.parse(exported);
+        assert(
+          raw.epoch === next &&
+            raw.notes.some(
+              (n: { markdown: string }) => n.markdown === incoming,
+            ),
+          'current exact source exported',
+        );
+        assert(
+          raw.retired?.epoch === epoch &&
+            (fallback ? raw.retired.lastValid.items : raw.retired.notes).some(
+              (n: { id: string; markdown: string }) =>
+                n.id === rows[0].id &&
+                n.markdown === (fallback ? marked : latest),
+            ),
+          'exact retired source and epoch exported',
+        );
+        assert(
+          !exported.includes('unrelated account text'),
+          'full export stays account-bound',
+        );
+      } finally {
+        engine.close();
+      }
+      return 'ok';
+    }
+    if (scenario === 'device-capacity' || scenario === 'adoptable-input') {
+      const template = (await db.notes.get([epoch, id]))!;
+      const draftText = 'exact draft 雪'.padEnd(900 * 1024, 'd');
+      if (scenario === 'device-capacity') {
+        const rows = Array.from({ length: 8 }, () => ({
+          ...template,
+          id: crypto.randomUUID(),
+          markdown: 's'.repeat(1024 * 1024),
+        }));
+        await db.notes.bulkAdd(rows);
+        await db.drafts.bulkAdd(
+          rows.slice(0, 3).map((r) => ({
+            epoch,
+            key: r.id,
+            markdown: draftText,
+            revision: 5,
+            updatedAt: 2,
+          })),
+        );
+      } else
+        await retainRawBuffers(
+          db,
+          [{ key: id, markdown: 'adoptable', revision: 7 }],
+          epoch,
+        );
+      const h = await remoteHarness(db, repo);
+      try {
+        await h.engine.retry();
+        assert(
+          h.state.state === 'needs-sync',
+          'unadopted full device view cannot confirm',
+        );
+        assert(
+          scenario === 'device-capacity'
+            ? !!h.state.overflow
+            : !h.state.overflow,
+          'capacity differs from adoptable raw input',
+        );
+        assert(
+          !(await h.engine.inspectOverflow()).overflow,
+          'device data alone cannot authorize shared purge',
+        );
+        let rejected = false;
+        try {
+          await h.engine.purgeOverflow({ epoch, ids: [id] });
+        } catch {
+          rejected = true;
+        }
+        assert(
+          rejected && (await db.notes.get([epoch, id])),
+          'valid shared notes are protected',
+        );
+        if (scenario === 'device-capacity') {
+          const shrink = h.server.notes.filter((r) => r.id !== id).slice(-3);
+          for (const r of shrink) {
+            r.markdown = 'smaller';
+            await db.notes.put(r);
+          }
+        }
+        const next = await repo.loadWorkspace();
+        assert(
+          scenario === 'device-capacity'
+            ? next.drafts.length === 3 &&
+                next.drafts.every(
+                  (d) => d.markdown === draftText && d.revision === 5,
+                )
+            : next.drafts.some(
+                (d) => d.key === id && d.markdown === 'adoptable',
+              ),
+          'exact device input resumes',
+        );
+        await h.engine.retry();
+        assert(
+          String(h.state.state) === 'up-to-date',
+          'valid full view can confirm after resumption',
+        );
+      } finally {
+        h.engine.close();
+      }
+      return 'ok';
+    }
     if (
       scenario === 'fix2-mixed-source' ||
       scenario === 'fix2-mixed-unrelated'
