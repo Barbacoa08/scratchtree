@@ -1,13 +1,17 @@
-<!-- Monochrome interpretation of the selected small tree silhouette. -->
+<!-- Locally authored Flowing Roots mark for the Root destination. -->
 <svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-  <path
-    d="M7.5 0C6.7 0 5.9.9 5.4 1.8 4.6 3.2 4.7 4.6 5.2 5.8l.7 1.6c.1.3 0 .3-.3.3-1.8-.1-3.1-.3-4.1-1.5C.8 5.4 0 5.8 0 6.5c0 1 1.1 1.9 2.3 2.4 1.4.6 3.2.5 3.4 2.1.3 1.8-.5 2.8-1.8 3.5-.7.4-2.3.6-2.3 1.1 0 .3.3.4.8.4h11.2c.5 0 .8-.1.8-.4 0-.5-1.6-.7-2.3-1.1-1.1-.6-1.8-1.6-2-2.9-.2-1.2-.8-2.1-.7-2.8.2-1.8 2.1-2.3 3.5-2.6 1.5-.3 3.1-.8 3.1-2.1 0-.8-.8-1.1-1.4-.5-1 1.2-1.7 1.2-3.3 1.3-1.4.1-2.4.5-3.2 1.1-.3.2-.5-.1-.7-.4-.8-1.5-.7-3.3.3-4.8C8.5.5 8.2 0 7.5 0Z"
-  />
+  <g
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M1.2 3.7H14.8" />
+    <path d="M8 3.7C8.2 6.7 6.8 8.4 7.7 10.7L8.9 14" />
+    <path d="M7.9 6.5C6.1 8.4 2.7 8.3 1.4 12.4" />
+    <path d="M4.5 8.9C4.7 10.3 4.1 11.6 3.8 13.2" />
+    <path d="M7.6 7.7C9.4 8 12.6 8.4 14.6 11.7" />
+    <path d="M11.3 8.7C11.1 10.2 11.7 11.6 12 13.2" />
+  </g>
 </svg>
-
-<style>
-  .icon {
-    fill: currentColor;
-    stroke: none;
-  }
-</style>
