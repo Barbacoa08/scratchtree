@@ -1390,10 +1390,16 @@
   function focusInline(options?: { end?: boolean }) {
     noteBodies[controller.state.activeKey]?.focus(options);
   }
+  function captureEmptyStream() {
+    if (blocked || shownEntries.length || !stream) return false;
+    ++interaction;
+    stream.focus();
+    return true;
+  }
   function capturePrevious() {
     if (blocked) return false;
     const note = shownEntries.filter((x) => x.kind === 'note').at(-1);
-    if (!note) return false;
+    if (!note) return captureEmptyStream();
     ++interaction;
     setSelected(note.id);
     selection.remember(viewState.location, selected);
@@ -1906,6 +1912,7 @@
             onsubmit={() => submit(captureKey)}
             oncancel={() => stream?.focus()}
             onup={capturePrevious}
+            onleft={captureEmptyStream}
             oncontext={(fenced) => (captureFenced = fenced)}
           />
           <p class="hint">

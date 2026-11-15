@@ -11,7 +11,7 @@ import { sourceExtensions, editorSource } from '../../src/lib/editor/source';
 import {
   fencedSelection,
   enterKey,
-  captureUp,
+  captureBoundary,
 } from '../../src/lib/editor/policy';
 function editor(
   doc: string,
@@ -140,18 +140,18 @@ describe('fenced Markdown key policy with actual syntax trees', () => {
     expect(editorSource(e.state)).toBe('```\nx');
   });
 });
-describe('capture-only Up boundary policy', () => {
+describe('capture-only arrow boundary policy', () => {
   it('calls navigation only for one empty zero selection and consumes only a real target', () => {
     const e = editor('draft', 0);
     let calls = 0;
     expect(
-      captureUp(e, false, () => {
+      captureBoundary(e, false, () => {
         calls++;
         return true;
       }),
     ).toBe(true);
     expect(calls).toBe(1);
-    expect(captureUp(e, false, () => false)).toBe(false);
+    expect(captureBoundary(e, false, () => false)).toBe(false);
     for (const selection of [
       EditorSelection.single(1),
       EditorSelection.single(0, 2),
@@ -162,15 +162,15 @@ describe('capture-only Up boundary policy', () => {
     ]) {
       e.select(selection);
       expect(
-        captureUp(e, false, () => {
+        captureBoundary(e, false, () => {
           throw Error('must not navigate');
         }),
       ).toBe(false);
     }
     e.select(EditorSelection.single(0));
     e.composing = true;
-    expect(captureUp(e, false, () => true)).toBe(false);
+    expect(captureBoundary(e, false, () => true)).toBe(false);
     e.composing = false;
-    expect(captureUp(e, true, () => true)).toBe(false);
+    expect(captureBoundary(e, true, () => true)).toBe(false);
   });
 });
