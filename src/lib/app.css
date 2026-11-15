@@ -839,16 +839,12 @@ kbd {
   left: 0.35rem;
   top: 0.45rem;
 }
-.tree-card-icon .tree-icon {
-  width: 1rem;
-  height: 1rem;
-}
 .tree-icon {
-  width: 30px;
-  height: 30px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
+  /* Match the former stack's visible height: 13.258px at the normal text size. */
+  width: 0.828625rem;
+  height: 0.828625rem;
+  fill: currentColor;
+  stroke: none;
   flex: none;
 }
 .tree-open {
@@ -906,10 +902,6 @@ kbd {
   gap: 0.35rem;
   min-width: 0;
 }
-.current-tree-heading .tree-icon {
-  width: 1rem;
-  height: 1rem;
-}
 .current-tree-heading > span {
   min-width: 0;
   overflow: hidden;
@@ -931,8 +923,7 @@ kbd {
   align-items: center;
 }
 .tree-link .tree-icon {
-  width: 1.125rem;
-  height: 1.125rem;
+  justify-self: center;
 }
 .tree-name {
   overflow: hidden;
@@ -1294,7 +1285,7 @@ kbd {
   top: 1rem;
 }
 
-/* One fixed slot: pointer hover swaps stack/marker for grip without moving source. */
+/* One fixed slot: pointer hover swaps tree/marker for grip without moving source. */
 .note-color {
   display: inline-block;
   width: 0.55rem;
@@ -1335,7 +1326,6 @@ kbd {
 .note-card[data-kind='tree'] .note-select {
   pointer-events: auto;
 }
-.item-slot .tree-icon,
 .drag-handle svg {
   width: 1.125rem;
   height: 1.125rem;
@@ -1395,7 +1385,7 @@ kbd {
 .item-slot .note-select:focus-visible .note-color {
   visibility: hidden;
 }
-/* Keyboard reorder keeps a tree's stack; its focus ring identifies the action. */
+/* Keyboard reorder keeps a tree's icon; its focus ring identifies the action. */
 .note-card[data-kind='tree']:not(:hover) .drag-handle span {
   opacity: 0;
 }
@@ -1506,7 +1496,7 @@ kbd {
   color: var(--reset-check);
 }
 
-/* Search, Root, top-level stacks, and footer actions share icon columns. */
+/* Search, Root, top-level trees, and footer actions share icon columns. */
 main:has(.workspace) .sidebar {
   padding-inline: 6px;
 }
