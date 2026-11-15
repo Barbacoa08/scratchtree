@@ -284,3 +284,93 @@ for (const malformed of [false, true])
       ).toBeVisible();
     },
   );
+
+test('slow native startup explains system permission without taking newer focus', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as any).isTauri = true;
+    (window as any).__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: 'main' } },
+      invoke: async () => {},
+      transformCallback: () => 0,
+    };
+  });
+  await page.route('**/src/lib/sync/session.ts*', async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body:
+        (await response.text()) +
+        `
+      const originalOpen = PersistentSession.open.bind(PersistentSession);
+      PersistentSession.open = async options => {
+        await options.beforeOpenCloudCache?.();
+        window.__noticeBeforeOpen = Array.from(document.querySelectorAll('p')).some(node => node.textContent.includes('macOS Keychain protects'));
+        await new Promise(resolve => { window.__releaseStartup = resolve; });
+        return originalOpen(options);
+      };
+    `,
+    });
+  });
+  await page.goto('/');
+  const opening = page.getByRole('region', { name: 'Opening notes' });
+  await expect(opening.getByRole('status')).toHaveText('Opening your notes…');
+  await expect(opening.getByText(/macOS Keychain protects/)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__noticeBeforeOpen)).toBe(
+    true,
+  );
+  await page.evaluate(() => {
+    const button = document.createElement('button');
+    button.textContent = 'Newer startup focus';
+    document.body.append(button);
+    button.focus();
+    (window as any).__releaseStartup();
+  });
+  await expect(composer(page)).toBeVisible();
+  await expect(opening).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Newer startup focus' }),
+  ).toBeFocused();
+});
+
+test('startup Retry reuses a slow opening and late success opens notes without restarting', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.route('**/src/lib/sync/session.ts*', async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body:
+        (await response.text()) +
+        `
+      const originalOpen = PersistentSession.open.bind(PersistentSession);
+      window.__startupAttempts = 0;
+      PersistentSession.open = async options => {
+        window.__startupAttempts++;
+        await new Promise(resolve => { window.__releaseStartup = resolve; });
+        return originalOpen(options);
+      };
+    `,
+    });
+  });
+  await page.goto('/');
+  await expect
+    .poll(() => page.evaluate(() => typeof (window as any).__releaseStartup))
+    .toBe('function');
+  await page.clock.fastForward(11000);
+  await expect(
+    page.getByRole('heading', { name: 'Notes are still opening' }),
+  ).toBeVisible();
+  const retry = page.getByRole('button', { name: 'Retry opening notes' });
+  await retry.click();
+  await expect(retry).toBeDisabled();
+  expect(await page.evaluate(() => (window as any).__startupAttempts)).toBe(1);
+  await page.clock.fastForward(11000);
+  await expect(retry).toBeEnabled();
+  await page.evaluate(() => (window as any).__releaseStartup());
+  await expect(composer(page)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__startupAttempts)).toBe(1);
+  await expect(retry).toHaveCount(0);
+});

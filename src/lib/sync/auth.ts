@@ -25,6 +25,7 @@ export interface AuthHost {
 type Attempt = {
   generation: number;
   cancelled: boolean;
+  prepared: boolean;
   prompt?: DXCUserInteraction;
   login?: Promise<void>;
   start?: Promise<void>;
@@ -98,9 +99,13 @@ export class CloudAuthController implements AuthPort {
     this.generation++;
     this.patch({ open: true, phase: 'email', error: null, canCancel: true });
   }
-  private cancelAttempt() {
+  private cancelAttempt(retryingEmail = false) {
     const attempt = this.attempt;
     if (!attempt) return this.cleanup;
+    // A failed preparation has no provider login to cancel. A fresh Send code
+    // can rejoin its pending cache open; an explicit dismissal releases it.
+    if (retryingEmail && !attempt.prepared && !attempt.cancelled)
+      return this.cleanup;
     if (attempt.cancelled) {
       // A failed cleanup remains the session's durable responsibility. A fresh
       // user attempt explicitly retries it before opening another login flow.
@@ -149,7 +154,7 @@ export class CloudAuthController implements AuthPort {
     const generation = ++this.generation;
     this.patch({ phase: 'sending-code', email, error: null, canCancel: true });
     try {
-      await this.cancelAttempt();
+      await this.cancelAttempt(true);
     } catch (error) {
       if (generation === this.generation)
         this.patch({ phase: 'email', error: message(error) });
@@ -171,6 +176,7 @@ export class CloudAuthController implements AuthPort {
     const attempt: Attempt = {
       generation,
       cancelled: false,
+      prepared: false,
       waiters: new Set(),
       promptError: false,
     };
@@ -179,6 +185,7 @@ export class CloudAuthController implements AuthPort {
     attempt.start = (async () => {
       try {
         const api = await this.host.prepareSignIn();
+        attempt.prepared = true;
         if (!this.current(attempt)) {
           this.settle(attempt);
           return;

@@ -52,9 +52,9 @@ Still to discuss: public registration/invitations and multi-user access, account
 
 ## Native sign-in and status wording
 
-Keep the normal sign-in flow to email and code. Explain any necessary macOS authorization for the app's protected device sign-in key before the system prompt, and use recognizable app naming. Preserve existing keys and their access controls; changing a confusing label must not reset authentication material. Investigate recovery when a system permission wait outlasts the cache-opening deadline, so users are not misleadingly told to reconnect or left needing a restart. Stable signing and any separate test identity remain separately authorized decisions.
+Keep the normal sign-in flow to email and code. Explain any necessary macOS authorization for the app's protected device sign-in key before the system prompt, and use recognizable app naming. Preserve existing keys and their access controls; changing a confusing label must not reset authentication material. Current source explains the native Keychain request and retains one cache-opening attempt across permission-wait deadlines, so Retry can continue without restarting the app. Packaged native acceptance of this change remains a separate check. Stable signing and any separate test identity remain separately authorized decisions.
 
-The right panel's “Local activity” heading now also contains cloud synchronization feedback. Choose concise wording that covers local saves and server confirmation without implying local-only storage or versioned backups. Keep the panel compact.
+The right panel uses **Status**, covering local saves and cloud synchronization without implying versioned backups. Its signed-out explanation identifies notes and drafts on this Mac; its signed-in explanation covers local saves and cloud sync. Keep the panel compact.
 
 ## Mobile companions
 

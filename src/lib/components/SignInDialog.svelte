@@ -1,7 +1,12 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
+  import NativeKeychainNotice from './NativeKeychainNotice.svelte';
   import type { AuthPort, AuthState } from '../sync/service-types';
-  let { auth, value }: { auth: AuthPort; value: AuthState } = $props();
+  let {
+    auth,
+    value,
+    native = false,
+  }: { auth: AuthPort; value: AuthState; native?: boolean } = $props();
   let email = $state(untrack(() => value.email));
   let code = $state('');
   let dialog: HTMLDialogElement;
@@ -140,6 +145,7 @@
     <p class="auth-instruction">
       Sign in with an existing account. Sign-up is coming soon.
     </p>
+    {#if native}<NativeKeychainNotice id="auth-keychain-notice" />{/if}
     <label for="auth-email">Email</label>
     <input
       id="auth-email"
@@ -147,6 +153,7 @@
       type="email"
       required
       autocomplete="email"
+      aria-describedby={native ? 'auth-keychain-notice' : undefined}
       bind:value={email}
       disabled={value.phase !== 'email'}
       oninput={(e) => (emailValid = e.currentTarget.validity.valid)}
@@ -181,7 +188,9 @@
           ? 'Applying synced notes. Please wait.'
           : 'Signed in. Initial sync is pending.'}
       </p>{/if}
-    {#if value.phase === 'sending-code'}<p role="status">Sending code…</p>{/if}
+    {#if value.phase === 'sending-code'}<p role="status">
+        Preparing sign-in…
+      </p>{/if}
     {#if value.join}
       <p>
         This Mac has {value.join.localNotes} notes. Synced notes: {value.join

@@ -24,7 +24,7 @@ test('challenge retains input, locks cancellation while verifying, and returns f
   const code = dialog.getByLabel('Code');
   await email.fill('synthetic@example.test');
   await dialog.getByRole('button', { name: 'Send code' }).click();
-  await expect(dialog.getByText('Sending code…')).toBeVisible();
+  await expect(dialog.getByText('Preparing sign-in…')).toBeVisible();
   await expect(email).toHaveValue('synthetic@example.test');
   await page.evaluate(() =>
     (window as any).authUiFixture.setAuth({ phase: 'code' }),
@@ -714,4 +714,68 @@ test('sign-in dialog fits narrow light and dark views', async ({ page }) => {
     expect(box.x + box.width).toBeLessThanOrEqual(375);
     await page.keyboard.press('Escape');
   }
+});
+
+test('Status describes local work and cloud sync without implying version history', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 850 });
+  await page.goto('/?fixture&authFixture');
+  const status = page.getByRole('region', { name: 'Editor status' });
+  await expect(
+    status.getByRole('heading', { name: 'Status', exact: true }),
+  ).toBeVisible();
+  await expect(status.getByText('Notes and drafts on this Mac.')).toBeVisible();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      authenticated: true,
+      phase: 'signed-in',
+    }),
+  );
+  await expect(status.getByText('Local saves and cloud sync.')).toBeVisible();
+  await expect(status.getByText('Notes and drafts on this Mac.')).toHaveCount(
+    0,
+  );
+});
+
+test('native sign-in explains the Keychain request before sending a code', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as any).isTauri = true;
+    (window as any).__TAURI_INTERNALS__ = { invoke: async () => {} };
+  });
+  await page.setViewportSize({ width: 375, height: 600 });
+  await page.goto('/?fixture&authFixture&lifecycle');
+  for (const theme of ['Light', 'Dark']) {
+    await page.getByRole('radio', { name: theme, exact: true }).check();
+    await page.getByRole('button', { name: 'Sign in / sign up' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText(/macOS Keychain protects/)).toBeVisible();
+    await expect(dialog.getByText(/WebCrypto Master Key/)).toBeVisible();
+    await expect(dialog.getByLabel('Email')).toHaveAccessibleDescription(
+      /macOS Keychain protects.*WebCrypto Master Key/,
+    );
+    await expect(dialog.getByLabel('Email')).toBeFocused();
+    expect(
+      await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath(`sign-in-${theme.toLowerCase()}.png`),
+    });
+    await page.keyboard.press('Escape');
+    await expect(
+      page.getByRole('button', { name: 'Sign in / sign up' }),
+    ).toBeFocused();
+  }
+});
+
+test('browser sign-in does not claim a macOS permission will appear', async ({
+  page,
+}) => {
+  await page.goto('/?fixture&authFixture');
+  await page.getByRole('button', { name: 'Sign in / sign up' }).click();
+  await expect(
+    page.getByRole('dialog').getByText(/macOS Keychain/),
+  ).toHaveCount(0);
 });

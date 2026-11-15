@@ -1737,8 +1737,12 @@
       )}
     aria-label="Editor status"
   >
-    <h2 class:sr-only={compact}><Icon name="info" /> Local activity</h2>
-    {#if !compact}<p>Notes and drafts on this Mac.</p>{/if}
+    <h2 class:sr-only={compact}><Icon name="info" /> Status</h2>
+    {#if !compact}<p>
+        {authState.authenticated
+          ? 'Local saves and cloud sync.'
+          : 'Notes and drafts on this Mac.'}
+      </p>{/if}
     {#if sync && (!compact || syncState.state === 'needs-sync' || syncState.detail || syncState.recoveries || syncState.overflow || syncAttention)}<SyncStatus
         {sync}
         value={syncState}
@@ -2345,4 +2349,8 @@
   />
 {/if}
 
-{#if auth && authState.open}<SignInDialog {auth} value={authState} />{/if}
+{#if auth && authState.open}<SignInDialog
+    {auth}
+    value={authState}
+    native={nativeChrome}
+  />{/if}

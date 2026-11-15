@@ -24,6 +24,8 @@ interface Options {
   fetch?: typeof fetch;
   createDatabase?: (options: DatabaseOptions) => ScratchtreeDatabase;
   timeoutMs?: number;
+  signal?: AbortSignal;
+  beforeOpenCloudCache?: () => Promise<void>;
 }
 type Controller = Pick<
   WorkspaceController,
@@ -37,6 +39,8 @@ function queue() {
     return run;
   };
 }
+const cacheWaitMessage =
+  'The local sync storage is still opening. Finish any permission prompt, then retry.';
 const inactive = () =>
   new Error('The active notes changed. Retry from the current view.');
 /** One local activation record decides which durable database is allowed to serve notes. */
@@ -50,6 +54,12 @@ export class PersistentSession {
   private repo!: DexieRepository;
   private engine!: SyncEngine;
   private candidate?: ScratchtreeDatabase;
+  private opening?: {
+    db: ScratchtreeDatabase;
+    ready: Promise<unknown>;
+    automaticSync: boolean;
+    abandoned: boolean;
+  };
   private closed = false;
   private priorEpoch: string | null = null;
   // A controller can preserve several revisions before it publishes the replacement.
@@ -86,6 +96,7 @@ export class PersistentSession {
       cancelSignIn: () =>
         this.lifecycle(async () => {
           if (this.candidate) await this.cleanup();
+          else this.abandonOpening();
         }),
       finishSignIn: () => this.finish(false),
       acceptCloud: () => this.finish(true),
@@ -204,13 +215,21 @@ export class PersistentSession {
     const make =
       options.createDatabase ?? ((opts) => new ScratchtreeDatabase(opts));
     const plain = make({ name: options.localName ?? 'scratchtree-local-v8' });
-    await plain.open();
     let s: PersistentSession | undefined;
-    try {
+    let abort!: () => void;
+    const cancelled = new Promise<never>((_, reject) => {
+      abort = () => reject(options.signal!.reason);
+    });
+    const initialize = async () => {
+      options.signal?.throwIfAborted();
+      await plain.open();
       const a = await readActivation(plain);
+      options.signal?.throwIfAborted();
       s = new PersistentSession(options, plain, a);
       if (a.mode === 'attached') {
-        const db = await s.cloud(false);
+        await options.beforeOpenCloudCache?.();
+        options.signal?.throwIfAborted();
+        const db = await s.cloud('startup');
         const cached = new DexieRepository(db, options.files, a.account!);
         const user = db.cloud.currentUser.getValue();
         if (user.isLoggedIn) await s.requireUser(db, a.account);
@@ -233,6 +252,7 @@ export class PersistentSession {
             )
               throw error;
             // No SDK sync, login, logout, or cache mutation in this recovery session.
+            s.check();
             s.expiredRecovery = true;
             s.candidate = undefined;
             s.bind(cached);
@@ -259,11 +279,13 @@ export class PersistentSession {
             const detached = await detach(plain, t, a.account!);
             db.close();
             s.stopAuth();
+            s.check();
             s = new PersistentSession(options, plain, detached);
             s.bind(new DexieRepository(plain, options.files));
             return s;
           }
         }
+        s.check();
         s.bind(cached);
         s.candidate = undefined;
         // Serve the existing cache before transport setup. Reopen failure leaves every
@@ -271,12 +293,15 @@ export class PersistentSession {
         const session = s;
         void s
           .lifecycle(() => session.enableTransport(a.account!))
-          .catch(() => {
+          .catch((error) => {
             if (!session.closed && !session.receiptState.overflow)
               session.publish({
                 ...session.receiptState,
                 state: 'needs-sync',
-                detail: 'Could not start sync. Retry when connected.',
+                detail:
+                  error instanceof Error && error.message === cacheWaitMessage
+                    ? cacheWaitMessage
+                    : 'Could not start sync. Retry when connected.',
               });
           });
       } else {
@@ -287,13 +312,23 @@ export class PersistentSession {
           a.mode === 'local',
         );
         await local.settleLocalWrites();
+        s.check();
         s.bind(local);
       }
+      s.check();
       return s;
+    };
+    options.signal?.addEventListener('abort', abort);
+    try {
+      // A mounted route owns this startup; an entered platform call can
+      // remain pending after Dexie closes, so explicitly release the caller.
+      return await Promise.race([initialize(), cancelled]);
     } catch (error) {
       s?.close();
       plain.close();
       throw error;
+    } finally {
+      options.signal?.removeEventListener('abort', abort);
     }
   }
   attachController(controller: Controller) {
@@ -318,27 +353,62 @@ export class PersistentSession {
       clearTimeout(timer);
     }
   }
-  private async cloud(automaticSync: boolean) {
+  private async cloud(mode: 'startup' | 'manual' | 'automatic') {
     this.check();
-    const opts = {
-      name: this.options.cloudName ?? 'scratchtree-cloud-v8',
-      databaseUrl: this.options.databaseUrl,
-      automaticSync,
-    };
-    const db =
-      this.options.createDatabase?.(opts) ?? new ScratchtreeDatabase(opts);
-    this.candidate = db;
-    try {
-      await this.bound(
-        db.open(),
-        'Cloud storage did not open. Retry when connected.',
-      );
-      this.check();
-      return db;
-    } catch (e) {
-      db.close();
-      throw e;
+    const automaticSync = mode === 'automatic';
+    if (!this.opening) {
+      const opts = {
+        name: this.options.cloudName ?? 'scratchtree-cloud-v8',
+        databaseUrl: this.options.databaseUrl,
+        automaticSync,
+      };
+      const db =
+        this.options.createDatabase?.(opts) ?? new ScratchtreeDatabase(opts);
+      const ready = db.open();
+      this.opening = { db, automaticSync, ready, abandoned: false };
+      void ready.catch(() => {
+        if (this.opening?.db === db) {
+          this.opening = undefined;
+          db.close();
+        }
+      });
     }
+    const opening = this.opening;
+    if (opening.automaticSync !== automaticSync) throw inactive();
+    opening.abandoned = false;
+    // Startup's route owns the bounded wait and can rejoin its same promise.
+    if (mode === 'startup') await opening.ready;
+    else {
+      try {
+        await this.bound(opening.ready, cacheWaitMessage);
+      } catch (error) {
+        // An idle automatic connection must not start serving transport
+        // unchecked when a timed-out caller is no longer there to bind it.
+        if (automaticSync && this.opening === opening) this.abandonOpening();
+        throw error;
+      }
+    }
+    this.check();
+    if (this.opening !== opening || opening.abandoned) throw inactive();
+    this.opening = undefined;
+    this.candidate = opening.db;
+    return opening.db;
+  }
+  private abandonOpening() {
+    const opening = this.opening;
+    if (!opening || opening.abandoned) return;
+    // Let the entered SDK ready handler drain. Only the same, still-abandoned
+    // opening may be disposed; a newer explicit retry can claim it meanwhile.
+    opening.abandoned = true;
+    void opening.ready.then(
+      () => {
+        if (this.opening === opening && opening.abandoned) {
+          this.opening = undefined;
+          opening.db.close();
+        }
+      },
+      () => {},
+    );
   }
   private async requireUser(db: ScratchtreeDatabase, expected: string | null) {
     const u = db.cloud.currentUser.getValue();
@@ -360,8 +430,15 @@ export class PersistentSession {
     this.check();
     if (this.activation.mode === 'attached') throw inactive();
     if (this.activation.cleanupNeeded) await this.cleanup();
-    await this.mark({ ...this.activation, cleanupNeeded: true });
-    const db = await this.cloud(false);
+    const db = await this.cloud('manual');
+    // No credentials can be created until we hand the ready API to login.
+    try {
+      await this.mark({ ...this.activation, cleanupNeeded: true });
+    } catch (error) {
+      db.close();
+      this.candidate = undefined;
+      throw error;
+    }
     if (db.cloud.currentUser.getValue().isLoggedIn)
       throw Error('Finish the previous sign-out before signing in.');
     return db.cloud;
@@ -371,7 +448,7 @@ export class PersistentSession {
       throw Error('Protect the local library before signing out.');
     const db = this.candidate?.isOpen()
       ? this.candidate
-      : await this.cloud(false);
+      : await this.cloud('manual');
     try {
       await this.bound(
         db.cloud.logout({ force: true }),
@@ -399,6 +476,20 @@ export class PersistentSession {
     await this.lifecycle(async () => {
       this.check();
       if (this.activation.account !== account) throw inactive();
+      // Drain SDK startup before logout. An attached view owns a separate
+      // transport candidate; an authenticated, unadopted view needs its
+      // controlled connection to finish the actual logout.
+      if (this.opening?.automaticSync) {
+        const spare = await this.cloud('automatic');
+        spare.close();
+        this.candidate = undefined;
+      } else if (
+        this.activation.mode !== 'attached' &&
+        this.activation.cleanupNeeded &&
+        !this.candidate?.isOpen()
+      ) {
+        await this.cloud('manual');
+      }
       const leaving = this.repo;
       if (this.activation.mode === 'attached') {
         await this.writes(async () => {
@@ -440,12 +531,13 @@ export class PersistentSession {
         return null;
       }
       let db = this.candidate;
-      if (!db?.isOpen()) db = await this.cloud(false);
+      if (!db?.isOpen()) db = await this.cloud('manual');
       const account = await this.requireUser(db, this.activation.account);
       // Reopen after the first authenticated sync. Fresh services learn public primary-key
       // metadata on a real subsequent write; a no-change sync cannot register that schema.
       db.close();
-      db = await this.cloud(false);
+      this.candidate = undefined;
+      db = await this.cloud('manual');
       await this.requireUser(db, account);
       await this.bound(
         db.cloud.sync({ purpose: 'pull', wait: true }),
@@ -533,7 +625,7 @@ export class PersistentSession {
     )
       throw inactive();
     const old = this.repo;
-    const db = await this.cloud(true);
+    const db = await this.cloud('automatic');
     try {
       await this.requireUser(db, account);
       await this.writes(async () => {
@@ -561,6 +653,7 @@ export class PersistentSession {
       });
     } catch (error) {
       db.close();
+      this.candidate = undefined;
       throw error;
     }
   }
@@ -655,6 +748,8 @@ export class PersistentSession {
     this.closed = true;
     this.stopAuth();
     this.engine?.close();
+    this.opening?.db.close();
+    this.opening = undefined;
     this.candidate?.close();
     this.repo?.close();
     this.plain.close();

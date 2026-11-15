@@ -58,13 +58,13 @@ async function workspaceZ(
   }, overrides);
 }
 
-test('concise local activity retains actual live status and error recovery', async ({
+test('concise Status retains actual live status and error recovery', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1400, height: 800 });
   await seed(page);
   const status = page.getByRole('region', { name: 'Editor status' });
-  await expect(status.getByRole('heading')).toHaveText('Local activity');
+  await expect(status.getByRole('heading')).toHaveText('Status');
   await expect(status).toContainText('Notes and drafts on this Mac.');
   await capture(page).fill('retained local draft');
   await page.evaluate(() => {

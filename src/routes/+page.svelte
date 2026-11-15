@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { isTauri } from '@tauri-apps/api/core';
+  import NativeKeychainNotice from '../lib/components/NativeKeychainNotice.svelte';
   import { onMount, tick } from 'svelte';
   import { getAppearance } from '../lib/platform/appearance-context';
   import Workspace from '#lib/components/Workspace.svelte';
@@ -18,6 +20,11 @@
   let opening = $state(false);
   let openingError = $state(false);
   let openingRetry = $state<HTMLButtonElement>();
+  let slowOpening = $state(false);
+  let permissionWait = $state(false);
+  let native = $state(false);
+  let pendingOpen:
+    { controller: AbortController; promise: Promise<void> } | undefined;
   let alive = false;
   let session: PersistentSession | undefined;
 
@@ -36,7 +43,10 @@
     }
     if (restoreRetry) document.addEventListener('focusin', observeFocus);
     opening = true;
-    let candidate: PersistentSession | undefined;
+    const noticeTimer = setTimeout(() => {
+      if (alive && !mounted) slowOpening = true;
+    }, 500);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       const parameters = new URL(location.href).searchParams;
       if (import.meta.env.DEV && parameters.has('fixture')) {
@@ -51,31 +61,78 @@
           authFixture.install();
         }
       } else {
-        const [{ PersistentSession }, { nativeBackupFiles }] =
-          await Promise.all([
-            import('../lib/sync/session'),
-            import('../lib/platform/native-backup-files'),
-          ]);
-        candidate = await PersistentSession.open({
-          ...cloudConfiguration,
-          files: nativeBackupFiles,
-        });
-        if (!alive) {
-          candidate.close();
-          return;
+        // A caller deadline stops only this wait. The captured startup keeps its
+        // ownership until it settles or unmount aborts it; Retry reuses it.
+        if (!pendingOpen) {
+          const controller = new AbortController();
+          const promise = (async () => {
+            const [{ PersistentSession }, { nativeBackupFiles }] =
+              await Promise.all([
+                import('../lib/sync/session'),
+                import('../lib/platform/native-backup-files'),
+              ]);
+            if (controller.signal.aborted) return;
+            const candidate = await PersistentSession.open({
+              ...cloudConfiguration,
+              files: nativeBackupFiles,
+              signal: controller.signal,
+              beforeOpenCloudCache: native
+                ? async () => {
+                    if (!alive || controller.signal.aborted) return;
+                    slowOpening = true;
+                    await tick();
+                  }
+                : undefined,
+            });
+            if (!alive || controller.signal.aborted) {
+              candidate.close();
+              return;
+            }
+            session = candidate;
+            repository = candidate.repository;
+            auth = candidate.auth;
+            sync = candidate.sync;
+            ready = (workspace) => candidate.attachController(workspace);
+            openingError = false;
+            mounted = true;
+          })();
+          const attempt = { controller, promise };
+          pendingOpen = attempt;
+          // Only actual settlement permits another startup. A soft deadline is
+          // not cancellation of the SDK's already-entered readiness work.
+          void promise.then(
+            () => {
+              if (pendingOpen === attempt) pendingOpen = undefined;
+            },
+            () => {
+              if (pendingOpen !== attempt) return;
+              pendingOpen = undefined;
+              if (alive) {
+                permissionWait = false;
+                openingError = true;
+              }
+            },
+          );
         }
-        session = candidate;
-        repository = candidate.repository;
-        auth = candidate.auth;
-        sync = candidate.sync;
-        const current = candidate;
-        ready = (controller) => current.attachController(controller);
+        await Promise.race([
+          pendingOpen.promise,
+          new Promise<never>((_, reject) => {
+            deadline = setTimeout(() => {
+              permissionWait = true;
+              reject(new Error('Notes are still opening.'));
+            }, 10000);
+          }),
+        ]);
       }
       if (alive) mounted = true;
     } catch {
-      candidate?.close();
-      if (alive) openingError = true;
+      if (alive) {
+        permissionWait = !!pendingOpen;
+        openingError = true;
+      }
     } finally {
+      clearTimeout(deadline);
+      clearTimeout(noticeTimer);
       opening = false;
       await tick();
       if (restoreRetry && !newerFocus && alive && !mounted && openingError)
@@ -85,9 +142,11 @@
   }
   onMount(() => {
     alive = true;
+    native = isTauri();
     void open();
     return () => {
       alive = false;
+      pendingOpen?.controller.abort();
       session?.close();
     };
   });
@@ -105,18 +164,28 @@
     class="startup-error"
     aria-labelledby="startup-title"
   >
-    <h1 id="startup-title">Could not open your notes</h1>
+    <h1 id="startup-title">
+      {permissionWait ? 'Notes are still opening' : 'Could not open your notes'}
+    </h1>
     <p role="status">{opening ? 'Opening your notes…' : ''}</p>
     {#if !opening}<p role="alert">
-        Scratchtree could not open the notes stored on this Mac. Your existing
-        library has not been replaced.
+        {permissionWait
+          ? 'Opening is taking longer than expected. Complete any system permission prompt, then retry. Your notes have not been replaced.'
+          : 'Scratchtree could not open the notes stored on this Mac. Your existing library has not been replaced.'}
       </p>{/if}
+    {#if native}<NativeKeychainNotice />{/if}
     <button
       bind:this={openingRetry}
       disabled={opening}
       onclick={() => void open()}>Retry opening notes</button
     >
-  </main>{/if}
+  </main>{:else if opening && slowOpening}<section
+    class="startup-error"
+    aria-label="Opening notes"
+  >
+    <p role="status">Opening your notes…</p>
+    {#if native}<NativeKeychainNotice />{/if}
+  </section>{/if}
 
 <style>
   .startup-error {

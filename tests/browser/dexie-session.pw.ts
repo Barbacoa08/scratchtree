@@ -39,6 +39,8 @@ for (const scenario of [
   'head',
   'sequence',
   'attached-cold',
+  'pending-transport-signout',
+  'pending-adoption-signout',
   'empty-pointer',
   'transport-retry',
   'creation',

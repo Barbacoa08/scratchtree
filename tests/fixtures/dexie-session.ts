@@ -48,6 +48,7 @@ export async function run(which: string) {
   let onReopen:
     | ((previous: ScratchtreeDatabase, next: ScratchtreeDatabase) => void)
     | undefined;
+  const adoptionGate = latch();
   let ready: () => void = () => {};
   const files = {
     chooseRead: async () => null,
@@ -66,6 +67,12 @@ export async function run(which: string) {
     const db = new ScratchtreeDatabase({ name: opts.name });
     if (opts.name === cloudName) {
       constructs++;
+      if (
+        which === 'pending-adoption-signout' &&
+        !opts.automaticSync &&
+        user.isLoggedIn
+      )
+        db.on('ready', () => adoptionGate.wait);
       if (failAuto && opts.automaticSync)
         throw Error('Synthetic transport reopen failure');
       if (!opts.automaticSync) controlled = db;
@@ -368,6 +375,29 @@ export async function run(which: string) {
         state.phase === 'signed-in' &&
           (await load()).items[0]?.markdown === 'local',
         'existing empty shared library receives exact local notes',
+      );
+      return 'ok';
+    }
+    if (which === 'pending-adoption-signout') {
+      await sign();
+      assert(
+        state.phase === 'syncing' && state.authenticated && state.error,
+        'sign-in waits for the authenticated cache',
+      );
+      await s.auth.signOut();
+      assert(
+        state.authenticated && state.error && logouts === 0,
+        'sign-out cannot leave authenticated SDK readiness behind',
+      );
+      adoptionGate.release();
+      const count = constructs;
+      await s.auth.signOut();
+      assert(
+        !state.authenticated &&
+          logouts === 1 &&
+          constructs === count &&
+          (await load()).items[0].markdown === 'local',
+        'logout drains the captured cache without adoption',
       );
       return 'ok';
     }
@@ -741,6 +771,48 @@ export async function run(which: string) {
           ws.items[0].markdown === 'local' &&
           pulls === before,
         'expired session opens protected current cache without reusing stale credentials',
+      );
+      return 'ok';
+    }
+    if (which === 'pending-transport-signout') {
+      s.close();
+      const entered = latch(),
+        proceed = latch();
+      let spare: ScratchtreeDatabase | undefined;
+      onReopen = (_old, next) => {
+        spare = next;
+        next.on('ready', async () => {
+          entered.release();
+          await proceed.wait;
+        });
+      };
+      s = await open();
+      observe();
+      await entered.wait;
+      await s.auth.signOut();
+      assert(
+        state.authenticated &&
+          state.error &&
+          logouts === 0 &&
+          (await load()).items[0].markdown === 'local',
+        'blocked automatic open cannot outlive logout or detach the current cache',
+      );
+      proceed.release();
+      const until = performance.now() + 1500;
+      while (spare?.isOpen() && performance.now() < until)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      assert(
+        !spare?.isOpen(),
+        'unclaimed automatic transport closed after readiness',
+      );
+      const connections = constructs;
+      await s.auth.signOut();
+      assert(
+        !state.authenticated &&
+          logouts === 1 &&
+          constructs === connections &&
+          (await load()).items[0].markdown === 'local',
+        'sign-out retained notes and did not reopen transport',
       );
       return 'ok';
     }
