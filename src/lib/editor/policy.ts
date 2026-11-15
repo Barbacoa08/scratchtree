@@ -103,7 +103,7 @@ export function enterKey(
   return true;
 }
 
-export function captureUp(
+export function captureBoundary(
   target: Target,
   readOnly: boolean,
   navigate?: () => boolean,
