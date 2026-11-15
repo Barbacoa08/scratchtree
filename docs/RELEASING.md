@@ -60,6 +60,14 @@ Read `Contents/Info.plist` and confirm product name, bundle identifier, executab
 
 Release tag and internal application version are different identities: alpha.1 and alpha.2 used internal version `0.1.0`. Read and disclose the actual values rather than silently changing source while packaging. A version/configuration change belongs in a reviewed source change before the release build.
 
+## Native Keychain access
+
+WebKit protects persisted WebCrypto keys with an application-bound Keychain master key. A separate database or webview store does not isolate that key from other executables using the same application identity. Keep disposable probes out of the current Preview identity; a different probe identity needs explicit authorization. Never delete a master key or reset Keychain to make a build appear to pass.
+
+Record the packaged build's designated requirement with `codesign -d -r-`. Ad-hoc builds can have different requirements after rebuilding, so a valid seal does not establish continued access to existing keys. Native OTP, key persistence, and relaunch checks remain separate release gates. Stable signing credentials and notarization still require their own authorization. [Apple code-signing guidance](https://developer.apple.com/library/archive/technotes/tn2206/) explains identity tracking.
+
+If macOS requests Keychain access, identify the exact requesting build and item before advising the user. **Allow** authorizes an access; **Always Allow** adds that app to the relevant operation's trusted list and persists beyond one sign-in. It does not authorize every app. Never request the user's password through chat or promise an exact prompt count. Stop if the same request repeats after a persistent grant, or the requester or item differs from the verified one; investigate without removing protection. See [Apple's access-control documentation](https://developer.apple.com/documentation/security/access-control-lists).
+
 ## Package and inspect the DMG
 
 ```sh
