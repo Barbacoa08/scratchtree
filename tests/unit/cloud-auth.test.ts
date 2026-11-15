@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CloudAuthController,
   type AuthHost,
@@ -13,6 +13,7 @@ function setup() {
   let rejectLogin!: (error: Error) => void;
   let cancelled = 0;
   let started = 0;
+  let submitted = 0;
   const hints: unknown[] = [];
   const user: UserLogin = {
     claims: {},
@@ -91,7 +92,9 @@ function setup() {
           ],
       submitLabel: 'Submit',
       cancelLabel: 'Cancel',
-      onSubmit: () => {},
+      onSubmit: () => {
+        submitted++;
+      },
       onCancel: () => rejectLogin(new Error('Cancelled')),
     });
   return {
@@ -113,11 +116,237 @@ function setup() {
     setFailFinish: (value: boolean) => {
       failFinish = value;
     },
-    counts: () => ({ started, cancelled, finishCount, signedOut }),
+    counts: () => ({ started, submitted, cancelled, finishCount, signedOut }),
   };
 }
 
 describe('public Dexie login flow', () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function challenge(f: ReturnType<typeof setup>) {
+    f.auth.showSignIn();
+    const email = f.auth.submitEmail('dev@example.com');
+    await f.tick();
+    f.otp();
+    await email;
+  }
+
+  it('offers recovery at five seconds without submitting another code or adopting late authentication after Close', async () => {
+    vi.useFakeTimers();
+    const f = setup();
+    await challenge(f);
+    const code = f.auth.submitCode('123456');
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(f.auth.state.canCancel).toBe(false);
+    f.auth.dismiss();
+    expect(f.auth.state.open).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.auth.state).toMatchObject({
+      phase: 'verifying',
+      canCancel: true,
+      pendingRecovery: true,
+    });
+    await f.auth.submitCode('654321');
+    f.auth.dismiss();
+    await code;
+    f.success();
+    await f.tick();
+    expect(f.auth.state).toMatchObject({
+      open: false,
+      authenticated: false,
+      phase: 'signed-out',
+    });
+    expect(f.counts()).toMatchObject({
+      started: 1,
+      submitted: 1,
+      finishCount: 0,
+      cancelled: 1,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the original recovery deadline when verification becomes a pending initial sync', async () => {
+    vi.useFakeTimers();
+    const f = setup();
+    let release!: () => void;
+    f.host.finishSignIn = () =>
+      new Promise((resolve) => {
+        release = () => resolve(null);
+      });
+    await challenge(f);
+    const code = f.auth.submitCode('123456');
+    await vi.advanceTimersByTimeAsync(4000);
+    f.success();
+    await f.tick();
+    expect(f.auth.state).toMatchObject({
+      phase: 'syncing',
+      authenticated: true,
+      canCancel: false,
+    });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(f.auth.state.canCancel).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.auth.state).toMatchObject({
+      canCancel: true,
+      pendingRecovery: true,
+    });
+    f.auth.dismiss();
+    expect(f.auth.state.open).toBe(false);
+    release();
+    await code;
+    await f.tick();
+    expect(f.auth.state).toMatchObject({
+      phase: 'signed-in',
+      open: false,
+      pendingRecovery: false,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps recovery available if authentication succeeds after the deadline but sync remains pending', async () => {
+    vi.useFakeTimers();
+    const f = setup();
+    let release!: () => void;
+    f.host.finishSignIn = () =>
+      new Promise((resolve) => {
+        release = () => resolve(null);
+      });
+    await challenge(f);
+    const code = f.auth.submitCode('123456');
+    await vi.advanceTimersByTimeAsync(5000);
+    await code;
+    f.success();
+    await f.tick();
+    expect(f.auth.state).toMatchObject({
+      phase: 'syncing',
+      authenticated: true,
+      canCancel: true,
+      pendingRecovery: true,
+    });
+    f.auth.dismiss();
+    release();
+    await f.tick();
+    expect(f.auth.state).toMatchObject({ phase: 'signed-in', open: false });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps local use available while canceled provider work drains before another login', async () => {
+    vi.useFakeTimers();
+    const f = setup();
+    await challenge(f);
+    // A provider may ignore cancellation while its verification request is pending.
+    f.prompt({
+      type: 'otp',
+      title: 'Code',
+      submitLabel: 'Submit',
+      cancelLabel: 'Cancel',
+      fields: { otp: { type: 'text', label: 'Code' } },
+      alerts: [
+        {
+          type: 'info',
+          messageCode: 'OTP_SENT',
+          message: 'Code sent',
+          messageParams: {},
+        },
+      ],
+      onSubmit: () => {},
+      onCancel: () => {},
+    });
+    const code = f.auth.submitCode('123456');
+    await vi.advanceTimersByTimeAsync(5000);
+    f.auth.dismiss();
+    await code;
+    f.auth.showSignIn();
+    const next = f.auth.submitEmail('next@example.com');
+    await f.tick();
+    expect(f.counts().started).toBe(1);
+    expect(f.auth.state).toMatchObject({
+      phase: 'sending-code',
+      canCancel: true,
+    });
+    f.auth.dismiss();
+    f.success();
+    await next;
+    expect(f.counts()).toMatchObject({
+      started: 1,
+      finishCount: 0,
+      cancelled: 1,
+    });
+    expect(f.auth.state).toMatchObject({ phase: 'signed-out', open: false });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('bounds pending sync Retry and explicit adoption without duplicating their writes', async () => {
+    vi.useFakeTimers();
+    const f = setup();
+    f.setFailFinish(true);
+    await challenge(f);
+    const code = f.auth.submitCode('123456');
+    f.success();
+    await code;
+    let release!: () => void;
+    let calls = 0;
+    f.host.finishSignIn = () => {
+      calls++;
+      return new Promise((resolve) => {
+        release = () => resolve({ localNotes: 2, cloudNotes: 3 });
+      });
+    };
+    const retry = f.auth.retrySync();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.auth.state).toMatchObject({
+      canCancel: true,
+      pendingRecovery: true,
+    });
+    await f.auth.retrySync();
+    expect(calls).toBe(1);
+    release();
+    await retry;
+    let adopted = 0;
+    f.host.acceptCloud = () => {
+      adopted++;
+      return new Promise((resolve) => {
+        release = () => resolve();
+      });
+    };
+    const adoption = f.auth.acceptCloud();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.auth.state).toMatchObject({
+      canCancel: true,
+      pendingRecovery: true,
+    });
+    await f.auth.acceptCloud();
+    expect(adopted).toBe(1);
+    f.auth.dismiss();
+    release();
+    await adoption;
+    expect(f.auth.state).toMatchObject({
+      phase: 'signed-in',
+      open: false,
+      pendingRecovery: false,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('clears an invalid-code deadline before a new verification gets its own full grace period', async () => {
+    vi.useFakeTimers();
+    const f = setup();
+    await challenge(f);
+    const first = f.auth.submitCode('123456');
+    await vi.advanceTimersByTimeAsync(4000);
+    f.otp(true);
+    await first;
+    expect(vi.getTimerCount()).toBe(0);
+    const second = f.auth.submitCode('654321');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.auth.state.canCancel).toBe(false);
+    await vi.advanceTimersByTimeAsync(4000);
+    f.auth.dismiss();
+    await second;
+    await f.tick();
+    expect(f.auth.state.open).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('requests existing-user OTP once, and only enables the code after OTP_SENT', async () => {
     const f = setup();
     f.auth.showSignIn();

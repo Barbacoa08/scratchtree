@@ -13,6 +13,8 @@ export type AuthState = {
   email: string;
   error: string | null;
   canCancel: boolean;
+  /** The captured request is still pending, but the dialog may be closed. */
+  pendingRecovery?: boolean;
   authenticated: boolean;
   configured: boolean;
   join?: { localNotes: number; cloudNotes: number } | null;

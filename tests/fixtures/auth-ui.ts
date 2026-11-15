@@ -48,7 +48,13 @@ export const auth: AuthPort = {
     return () => authListeners.delete(fn);
   },
   showSignIn() {
-    setAuth({ open: true, phase: 'email', error: null });
+    setAuth({
+      open: true,
+      phase: 'email',
+      error: null,
+      canCancel: true,
+      pendingRecovery: false,
+    });
   },
   async submitEmail(email) {
     setAuth({ phase: 'sending-code', email });
@@ -60,7 +66,13 @@ export const auth: AuthPort = {
     setAuth({ phase: 'email', error: null });
   },
   dismiss() {
-    if (authState.canCancel) setAuth({ open: false });
+    if (authState.canCancel)
+      setAuth({
+        open: false,
+        ...(!authState.authenticated
+          ? { phase: 'signed-out', pendingRecovery: false }
+          : {}),
+      });
   },
   async signOut() {
     signOutAttempts++;

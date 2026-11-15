@@ -1,5 +1,78 @@
 import { expect, test } from '@playwright/test';
 
+test('pending verification recovery explains cancellation and Escape returns to local writing', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 600 });
+  await page.goto('/?fixture&authFixture');
+  const trigger = page.getByRole('button', { name: 'Sign in / sign up' });
+  await trigger.click();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      phase: 'verifying',
+      canCancel: false,
+    }),
+  );
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('status')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      canCancel: true,
+      pendingRecovery: true,
+    }),
+  );
+  await expect(dialog.getByRole('status')).toContainText(
+    'A late response will not sign you in after closing.',
+  );
+  await expect(
+    dialog.getByRole('button', { name: 'Sign in', exact: true }),
+  ).toBeDisabled();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused();
+  expect(
+    await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
+  ).toBe(true);
+  await page.screenshot({
+    path: test.info().outputPath('pending-verification-recovery.png'),
+  });
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  const composer = page.getByRole('textbox', { name: 'New note Markdown' });
+  await composer.fill('Local writing after recovery');
+  await expect(composer).toHaveText('Local writing after recovery');
+});
+
+test('pending adoption recovery keeps submitted action disabled and closes without claiming cancellation', async ({
+  page,
+}) => {
+  await page.goto('/?fixture&authFixture');
+  await page.getByRole('button', { name: 'Sign in / sign up' }).click();
+  await page.evaluate(() =>
+    (window as any).authUiFixture.setAuth({
+      phase: 'syncing',
+      authenticated: true,
+      canCancel: true,
+      pendingRecovery: true,
+      join: { localNotes: 2, cloudNotes: 3 },
+    }),
+  );
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('status')).toContainText(
+    'The submitted change may still finish.',
+  );
+  await expect(dialog.getByRole('status')).toBeFocused();
+  await expect(
+    dialog.getByRole('button', { name: 'Use synced notes' }),
+  ).toBeDisabled();
+  await page.screenshot({
+    path: test.info().outputPath('pending-adoption-recovery.png'),
+  });
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toHaveCount(0);
+});
+
 test('sign-in starts with both fields and a disabled code', async ({
   page,
 }) => {

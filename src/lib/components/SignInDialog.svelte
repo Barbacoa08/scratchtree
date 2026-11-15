@@ -30,7 +30,7 @@
   }
   function focusCurrent() {
     if (value.phase === 'syncing') {
-      if (!value.canCancel) syncStatus?.focus();
+      if (!value.canCancel || value.pendingRecovery) syncStatus?.focus();
       else if (value.join) joinButton?.focus();
       else if (value.error) retryButton?.focus();
       else syncStatus?.focus();
@@ -56,6 +56,7 @@
     const canCancel = value.canCancel;
     const join = value.join;
     const error = value.error;
+    const pendingRecovery = value.pendingRecovery;
     if (phase === 'syncing') {
       void tick().then(() => {
         if (
@@ -63,6 +64,7 @@
           value.canCancel === canCancel &&
           value.join === join &&
           value.error === error &&
+          value.pendingRecovery === pendingRecovery &&
           (dialog?.contains(document.activeElement) ||
             document.activeElement === document.body)
         )
@@ -177,16 +179,20 @@
         tabindex="-1"
         bind:this={verificationStatus}
       >
-        Finishing sign in. Please wait.
+        {value.pendingRecovery
+          ? 'Sign-in is still pending. Close to keep working locally. A late response will not sign you in after closing.'
+          : 'Finishing sign in. Please wait.'}
       </p>{/if}
-    {#if value.phase === 'syncing' && (!value.join || !value.canCancel)}<p
+    {#if value.phase === 'syncing' && (!value.join || !value.canCancel || value.pendingRecovery)}<p
         role="status"
         tabindex="-1"
         bind:this={syncStatus}
       >
-        {value.join
-          ? 'Applying synced notes. Please wait.'
-          : 'Signed in. Initial sync is pending.'}
+        {value.pendingRecovery
+          ? 'Sync is still pending. You can close this dialog to return to your notes. The submitted change may still finish.'
+          : value.join
+            ? 'Applying synced notes. Please wait.'
+            : 'Signed in. Initial sync is pending.'}
       </p>{/if}
     {#if value.phase === 'sending-code'}<p role="status">
         Preparing sign-in…
@@ -205,7 +211,9 @@
         <button
           type="button"
           bind:this={joinButton}
-          disabled={!auth.acceptCloud || !value.canCancel}
+          disabled={!auth.acceptCloud ||
+            !value.canCancel ||
+            value.pendingRecovery}
           onclick={() => void auth.acceptCloud?.()}>Use synced notes</button
         >
       {:else if value.phase === 'syncing' && value.error}<button

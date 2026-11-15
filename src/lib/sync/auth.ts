@@ -45,6 +45,7 @@ export class CloudAuthController implements AuthPort {
   private cleanup: Promise<void> = Promise.resolve();
   private finishing = false;
   private generation = 0;
+  private recoveryWait?: { timer: ReturnType<typeof setTimeout> };
   constructor(
     private host: AuthHost,
     authenticated = false,
@@ -68,8 +69,25 @@ export class CloudAuthController implements AuthPort {
     };
   }
   private patch(patch: Partial<AuthState>) {
+    if (patch.canCancel === true && patch.pendingRecovery !== true) {
+      if (this.recoveryWait) clearTimeout(this.recoveryWait.timer);
+      this.recoveryWait = undefined;
+      patch.pendingRecovery = false;
+    }
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) listener(this.state);
+  }
+  private beginRecoveryWait(attempt?: Attempt) {
+    if (this.recoveryWait) clearTimeout(this.recoveryWait.timer);
+    this.patch({ canCancel: false, pendingRecovery: false });
+    const wait = {
+      timer: setTimeout(() => {
+        if (this.recoveryWait !== wait) return;
+        this.patch({ canCancel: true, pendingRecovery: true });
+        if (attempt) this.settle(attempt);
+      }, 5000),
+    };
+    this.recoveryWait = wait;
   }
   private current(attempt: Attempt) {
     return (
@@ -132,7 +150,7 @@ export class CloudAuthController implements AuthPort {
         if (generation === this.generation)
           this.patch({ error: message(error) });
       });
-      this.patch({ phase: 'signed-out' });
+      this.patch({ phase: 'signed-out', canCancel: true });
     }
     this.patch({ open: false });
   }
@@ -208,11 +226,13 @@ export class CloudAuthController implements AuthPort {
               throw new Error(
                 'Authentication was not completed. Send a new code.',
               );
+            // Verification and initial sync share one deadline, including a
+            // provider success that arrives after recovery became available.
+            if (!this.recoveryWait) this.beginRecoveryWait(attempt);
             this.patch({
               phase: 'syncing',
               authenticated: true,
               error: null,
-              canCancel: false,
             });
             await this.finish(attempt);
           })
@@ -286,7 +306,8 @@ export class CloudAuthController implements AuthPort {
     )
       return;
     const ready = this.wait(attempt);
-    this.patch({ phase: 'verifying', error: null, canCancel: false });
+    this.beginRecoveryWait(attempt);
+    this.patch({ phase: 'verifying', error: null });
     attempt.prompt.onSubmit({ otp: code.trim() });
     await ready;
   }
@@ -326,13 +347,15 @@ export class CloudAuthController implements AuthPort {
       this.state.join
     )
       return;
-    this.patch({ error: null, canCancel: false });
+    this.beginRecoveryWait(this.attempt);
+    this.patch({ error: null });
     await this.finish(this.attempt);
   }
   async acceptCloud() {
     if (!this.state.join || this.finishing) return;
     this.finishing = true;
-    this.patch({ canCancel: false, error: null });
+    this.beginRecoveryWait(this.attempt);
+    this.patch({ error: null });
     try {
       const changed = await this.host.acceptCloud();
       if (changed) {
