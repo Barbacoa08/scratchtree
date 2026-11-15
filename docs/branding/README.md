@@ -1,6 +1,6 @@
 # Scratchtree branding direction
 
-Accepted name and vocabulary, with the selected icon family, recorded November 13, 2026. Root navigation and Dock integration use the family below. Future artwork treatments remain open to refinement.
+Accepted name and vocabulary, with the selected icon family, recorded November 13, 2026. The Dock uses the selected tree artwork family below; Root navigation uses the separate Flowing Roots mark described under Current application integration. Future artwork treatments remain open to refinement.
 
 ## Name and terminology
 
@@ -37,7 +37,7 @@ The original concept references are preserved to keep the decisions recoverable 
 
 ## Current application integration
 
-The sidebar uses a small, locally authored monochrome SVG interpretation of the selected tree-only silhouette, inheriting the text color. It labels the live-library destination Root, followed by a noninteractive separator. Root is always visible and never collapses. Other command and container icons remain unchanged.
+The sidebar uses the locally authored monochrome Flowing Roots SVG: a ground line over asymmetric, branching roots, inheriting the text color. It renders at 18 × 18px at the default text scale, with rounded strokes. This navigation mark is distinct from the tree artwork selected for the Dock icon. It labels the live-library destination Root, followed by a noninteractive separator. Root is always visible and never collapses. Other command and container icons remain unchanged.
 
 The Mac Dock icon uses the selected reference artwork in a light rounded tile. See [the native asset guide](../../src-tauri/icons/README.md) for the reproducible generator, source-hash checks, representation mapping, and platform limits. Standard logical 16px slots use the tree-only artwork, 32px slots use the adjusted ribbon +3, 128px uses compact, and larger slots use the large design. Each Retina representation uses its logical-size artwork. The 24px and 64px selections remain preserved as references; the standard generated iconset has no corresponding logical slots. macOS chooses the representation for the actual Dock context.
 

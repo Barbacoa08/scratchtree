@@ -42,7 +42,7 @@ Only open the app if you trust the download. A managed Mac may restrict this opt
 - Press Command+F to search and X to toggle completion. Command-click adds/removes selections; Shift-click selects a range. Drag or Command+Up/Down rearranges selected siblings, and M opens the move destination dialog.
 - Export backups from the app to keep a separate copy of your library. Trash retains deleted items and supports restoring them.
 
-The sections below describe editing, navigation, persistence, and development in more detail. The desktop stack is SvelteKit static output, Svelte, CodeMirror, Tauri, and native SQLite. Root is the always-visible top of the live library. Its small tree icon and separator distinguish it from the child trees below; it has no expand/collapse control. Other functional icons retain their existing appearance.
+The sections below describe editing, navigation, persistence, and development in more detail. The desktop stack is SvelteKit static output, Svelte, CodeMirror, Tauri, and native SQLite. Root is the always-visible top of the live library. Its small Flowing Roots icon and separator distinguish it from the child trees below; it has no expand/collapse control. Other functional icons retain their existing appearance.
 
 ## Appearance
 
