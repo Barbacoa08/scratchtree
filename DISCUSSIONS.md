@@ -50,6 +50,12 @@ Current source replaces native SQLite with persistent Dexie behind Repository an
 
 Still to discuss: public registration/invitations and multi-user access, account management beyond this private alpha, historical/versioned backup, and any future sharing. Mobile sync follows the same library once phone scope and platform acceptance are decided. The right pane uses concise current-library status with expanded confirmation/recovery details; connectivity alone does not imply success.
 
+## Native sign-in and status wording
+
+Keep the normal sign-in flow to email and code. Explain any necessary macOS authorization for the app's protected device sign-in key before the system prompt, and use recognizable app naming. Preserve existing keys and their access controls; changing a confusing label must not reset authentication material. Investigate recovery when a system permission wait outlasts the cache-opening deadline, so users are not misleadingly told to reconnect or left needing a restart. Stable signing and any separate test identity remain separately authorized decisions.
+
+The right panel's “Local activity” heading now also contains cloud synchronization feedback. Choose concise wording that covers local saves and server confirmation without implying local-only storage or versioned backups. Keep the panel compact.
+
 ## Mobile companions
 
 Mac comes first. Future iOS and Android companions are intended primarily for viewing, copy/paste, and short Markdown capture. Tauri is preferred, with Capacitor as a fallback if mobile friction warrants it. Decide the mobile scope and validate platform/editor constraints separately.
