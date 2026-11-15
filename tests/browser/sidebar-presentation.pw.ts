@@ -103,21 +103,31 @@ for (const large of [false, true]) {
     const dimensions = await row.evaluate((el) => {
       const box = (selector: string) => {
         const r = el.querySelector(selector)!.getBoundingClientRect();
-        return { width: r.width, height: r.height, center: r.y + r.height / 2 };
+        return {
+          width: r.width,
+          height: r.height,
+          center: r.y + r.height / 2,
+        };
       };
       return {
         chevron: box('.tree-expand svg'),
-        stack: box('.tree-link svg'),
+        tree: box('.tree-link svg'),
         label: box('.tree-name'),
       };
     });
-    expect(dimensions.chevron.width).toBe(dimensions.stack.width);
-    expect(dimensions.chevron.height).toBe(dimensions.stack.height);
+    const scale = large ? 1.5 : 1;
+    expect(dimensions.tree.width).toBeCloseTo(13.258 * scale, 1);
+    expect(dimensions.tree.height).toBeCloseTo(13.258 * scale, 1);
+    expect(dimensions.chevron.width).toBe(18 * scale);
+    expect(dimensions.chevron.height).toBe(18 * scale);
+    const root = page.locator('.root-link svg');
+    await expect(root).toHaveCSS('width', `${18 * scale}px`);
+    await expect(root).toHaveCSS('height', `${18 * scale}px`);
     expect(
-      Math.abs(dimensions.chevron.center - dimensions.stack.center),
+      Math.abs(dimensions.chevron.center - dimensions.tree.center),
     ).toBeLessThanOrEqual(1);
     expect(
-      Math.abs(dimensions.label.center - dimensions.stack.center),
+      Math.abs(dimensions.label.center - dimensions.tree.center),
     ).toBeLessThanOrEqual(1);
     const sidebar = page.getByRole('complementary', {
       name: 'Editor navigation',
@@ -180,12 +190,12 @@ for (const large of [false, true]) {
       };
       return {
         chevron: center('.tree-expand svg'),
-        stack: center('.tree-link svg'),
+        tree: center('.tree-link svg'),
         name: center('.tree-name'),
       };
     });
-    expect(Math.abs(centers.chevron - centers.stack)).toBeLessThanOrEqual(1);
-    expect(Math.abs(centers.stack - centers.name)).toBeLessThanOrEqual(1);
+    expect(Math.abs(centers.chevron - centers.tree)).toBeLessThanOrEqual(1);
+    expect(Math.abs(centers.tree - centers.name)).toBeLessThanOrEqual(1);
     await row.hover();
     await page.screenshot({
       path: `test-results/captures/sidebar-presentation/sidebar-deep-${large ? '150' : 'wide'}.png`,
