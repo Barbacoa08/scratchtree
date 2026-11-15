@@ -21,6 +21,7 @@ interface Options {
   accountCheckUrl: string;
   localName?: string;
   cloudName?: string;
+  useLocalRecovery?: boolean;
   fetch?: typeof fetch;
   createDatabase?: (options: DatabaseOptions) => ScratchtreeDatabase;
   timeoutMs?: number;
@@ -214,7 +215,7 @@ export class PersistentSession {
   static async open(options: Options) {
     const make =
       options.createDatabase ?? ((opts) => new ScratchtreeDatabase(opts));
-    const plain = make({ name: options.localName ?? 'scratchtree-local-v8' });
+    let plain = make({ name: options.localName ?? 'scratchtree-local-v8' });
     let s: PersistentSession | undefined;
     let abort!: () => void;
     const cancelled = new Promise<never>((_, reject) => {
@@ -223,6 +224,26 @@ export class PersistentSession {
     const initialize = async () => {
       options.signal?.throwIfAborted();
       await plain.open();
+      options.signal?.throwIfAborted();
+      // The activation and cloud cache form one profile. Recovery must never
+      // log out, clear, or adopt the original profile's unconfirmed cache.
+      const recoveryKey = 'startup-local-recovery';
+      if (options.useLocalRecovery)
+        await plain.device.put({ key: recoveryKey, value: true });
+      options.signal?.throwIfAborted();
+      if ((await plain.device.get(recoveryKey))?.value === true) {
+        options.signal?.throwIfAborted();
+        const localName = plain.name + '-recovery';
+        plain.close();
+        options = {
+          ...options,
+          localName,
+          cloudName:
+            (options.cloudName ?? 'scratchtree-cloud-v8') + '-recovery',
+        };
+        plain = make({ name: localName });
+        await plain.open();
+      }
       const a = await readActivation(plain);
       options.signal?.throwIfAborted();
       s = new PersistentSession(options, plain, a);

@@ -15,6 +15,8 @@ const code = ts.transpileModule(
 ).outputText;
 for (const scenario of [
   'cold',
+  'local-recovery-profile',
+  'local-recovery-preference-failure',
   'transport-replacement',
   'local-journal-cap',
   'expired-overflow',

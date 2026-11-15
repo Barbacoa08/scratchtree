@@ -376,3 +376,86 @@ test('startup Retry reuses a slow opening and late success opens notes without r
   expect(await page.evaluate(() => (window as any).__startupAttempts)).toBe(1);
   await expect(retry).toHaveCount(0);
 });
+
+test('five-second startup recovery opens separate persistent local notes and fences late startup', async ({
+  page,
+}) => {
+  await page.clock.install();
+  const requests: string[] = [];
+  page.on('request', (request) => {
+    if (/dexie\.cloud|scratchtree\.netlify\.app/.test(request.url()))
+      requests.push(request.url());
+  });
+  await page.route('**/src/lib/sync/session.ts*', async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body:
+        (await response.text()) +
+        `
+      const originalOpen = PersistentSession.open.bind(PersistentSession);
+      window.__startupLateClosed = false;
+      PersistentSession.open = async options => {
+        if (options.useLocalRecovery || sessionStorage.getItem('synthetic-recovery-started')) { sessionStorage.setItem('synthetic-recovery-started', '1'); return originalOpen(options); }
+        await new Promise(resolve => { window.__releasePreviousStartup = resolve; });
+        return { close() { window.__startupLateClosed = true; } };
+      };
+    `,
+    });
+  });
+  await page.goto('/');
+  await expect
+    .poll(() =>
+      page.evaluate(() => typeof (window as any).__releasePreviousStartup),
+    )
+    .toBe('function');
+  const local = page.getByRole('button', { name: 'Use separate local notes' });
+  await page.clock.fastForward(5000);
+  await expect(local).toBeEnabled();
+  await expect(
+    page.getByText(/Synced notes stay in\s+their existing cache/),
+  ).toBeVisible();
+  await local.click();
+  await expect(composer(page)).toBeVisible();
+  await composer(page).fill('Recovery library stays local');
+  await composer(page).press('Enter');
+  await expect(page.getByRole('article', { name: 'Saved note' })).toContainText(
+    'Recovery library stays local',
+  );
+  await page.evaluate(() => (window as any).__releasePreviousStartup());
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__startupLateClosed))
+    .toBe(true);
+  await expect(page.getByRole('article', { name: 'Saved note' })).toContainText(
+    'Recovery library stays local',
+  );
+  await page.reload();
+  await expect(page.getByRole('article', { name: 'Saved note' })).toContainText(
+    'Recovery library stays local',
+  );
+  expect(requests).toEqual([]);
+});
+
+test('unavailable browser preferences do not block a healthy local notes library', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const getItem = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (key: string) {
+      if (key === 'scratchtree.startup-local-recovery')
+        throw new DOMException('Synthetic denied preference', 'SecurityError');
+      return getItem.call(this, key);
+    };
+  });
+  await page.goto('/');
+  await expect(composer(page)).toBeVisible();
+  await composer(page).fill('IndexedDB works without browser preferences');
+  await composer(page).press('Enter');
+  await expect(page.getByRole('article', { name: 'Saved note' })).toContainText(
+    'IndexedDB works without browser preferences',
+  );
+  await page.reload();
+  await expect(page.getByRole('article', { name: 'Saved note' })).toContainText(
+    'IndexedDB works without browser preferences',
+  );
+});

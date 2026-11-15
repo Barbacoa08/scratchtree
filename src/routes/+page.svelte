@@ -23,13 +23,16 @@
   let slowOpening = $state(false);
   let permissionWait = $state(false);
   let native = $state(false);
+  let generation = 0;
   let pendingOpen:
     { controller: AbortController; promise: Promise<void> } | undefined;
   let alive = false;
   let session: PersistentSession | undefined;
 
-  async function open() {
+  async function open(useLocalRecovery = false) {
     if (opening) return;
+    const capturedGeneration = generation;
+    const current = () => alive && generation === capturedGeneration;
     const restoreRetry = document.activeElement === openingRetry;
     let newerFocus = false;
     function observeFocus(event: FocusEvent) {
@@ -44,7 +47,7 @@
     if (restoreRetry) document.addEventListener('focusin', observeFocus);
     opening = true;
     const noticeTimer = setTimeout(() => {
-      if (alive && !mounted) slowOpening = true;
+      if (current() && !mounted) slowOpening = true;
     }, 500);
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -74,17 +77,18 @@
             if (controller.signal.aborted) return;
             const candidate = await PersistentSession.open({
               ...cloudConfiguration,
+              useLocalRecovery,
               files: nativeBackupFiles,
               signal: controller.signal,
               beforeOpenCloudCache: native
                 ? async () => {
-                    if (!alive || controller.signal.aborted) return;
+                    if (!current() || controller.signal.aborted) return;
                     slowOpening = true;
                     await tick();
                   }
                 : undefined,
             });
-            if (!alive || controller.signal.aborted) {
+            if (!current() || controller.signal.aborted) {
               candidate.close();
               return;
             }
@@ -107,7 +111,7 @@
             () => {
               if (pendingOpen !== attempt) return;
               pendingOpen = undefined;
-              if (alive) {
+              if (current()) {
                 permissionWait = false;
                 openingError = true;
               }
@@ -118,27 +122,36 @@
           pendingOpen.promise,
           new Promise<never>((_, reject) => {
             deadline = setTimeout(() => {
-              permissionWait = true;
+              if (current()) permissionWait = true;
               reject(new Error('Notes are still opening.'));
-            }, 10000);
+            }, 5000);
           }),
         ]);
       }
-      if (alive) mounted = true;
+      if (current()) mounted = true;
     } catch {
-      if (alive) {
+      if (current()) {
         permissionWait = !!pendingOpen;
         openingError = true;
       }
     } finally {
       clearTimeout(deadline);
       clearTimeout(noticeTimer);
-      opening = false;
+      if (current()) opening = false;
       await tick();
-      if (restoreRetry && !newerFocus && alive && !mounted && openingError)
+      if (restoreRetry && !newerFocus && current() && !mounted && openingError)
         openingRetry?.focus();
       document.removeEventListener('focusin', observeFocus);
     }
+  }
+  function useLocalNotes() {
+    generation++;
+    pendingOpen?.controller.abort();
+    pendingOpen = undefined;
+    opening = false;
+    openingError = false;
+    permissionWait = false;
+    void open(true);
   }
   onMount(() => {
     alive = true;
@@ -178,6 +191,14 @@
       bind:this={openingRetry}
       disabled={opening}
       onclick={() => void open()}>Retry opening notes</button
+    >
+    <p>
+      This opens separate local notes and remembers your choice for future
+      launches. Synced notes stay in their existing cache and online, outside
+      this separate library. Sign in from the sidebar to reconnect with them.
+    </p>
+    <button disabled={opening} onclick={useLocalNotes}
+      >Use separate local notes</button
     >
   </main>{:else if opening && slowOpening}<section
     class="startup-error"

@@ -21,6 +21,13 @@ export async function run(which: string) {
     cloudName = name + '-cloud';
   const id = crypto.randomUUID(),
     other = crypto.randomUUID();
+  let recovering = false;
+  const recoveryUser = {
+    isLoggedIn: false,
+    claims: {},
+    lastLogin: new Date(),
+    userId: 'synthetic',
+  };
   let constructs = 0,
     fetches = 0,
     logouts = 0,
@@ -65,12 +72,13 @@ export async function run(which: string) {
     automaticSync?: boolean;
   }) => {
     const db = new ScratchtreeDatabase({ name: opts.name });
-    if (opts.name === cloudName) {
+    if (opts.name === cloudName || opts.name === cloudName + '-recovery') {
+      const profileUser = opts.name === cloudName ? user : recoveryUser;
       constructs++;
       if (
         which === 'pending-adoption-signout' &&
         !opts.automaticSync &&
-        user.isLoggedIn
+        profileUser.isLoggedIn
       )
         db.on('ready', () => adoptionGate.wait);
       if (failAuto && opts.automaticSync)
@@ -78,7 +86,7 @@ export async function run(which: string) {
       if (!opts.automaticSync) controlled = db;
       else if (controlled) onReopen?.(controlled, db);
       const api = {
-        currentUser: { getValue: () => user },
+        currentUser: { getValue: () => profileUser },
         userInteraction: {
           subscribe: (fn: typeof prompt) => {
             prompt = fn;
@@ -103,8 +111,8 @@ export async function run(which: string) {
               submitLabel: 'Submit',
               cancelLabel: 'Cancel',
               onSubmit: () => {
-                user.isLoggedIn = true;
-                user.userId = who;
+                profileUser.isLoggedIn = true;
+                profileUser.userId = who;
                 ready();
               },
               onCancel: () => {
@@ -121,7 +129,7 @@ export async function run(which: string) {
             await hook;
           }
           if (hang) await new Promise(() => {});
-          user.isLoggedIn = false;
+          profileUser.isLoggedIn = false;
           for (const t of db.tables) await t.clear();
         },
         sync: async () => {
@@ -137,13 +145,18 @@ export async function run(which: string) {
           webSocketStatus: idle,
         });
         Object.defineProperty(db, 'cloudEnabled', { value: true });
-        Object.assign(user, {
+        Object.assign(profileUser, {
           accessToken: 'synthetic-token',
           accessTokenExpiration: new Date(Date.now() + 60000),
         });
       }
       Object.defineProperty(db, 'cloud', { value: api });
     } else {
+      if (recovering && which === 'local-recovery-preference-failure')
+        db.device.hook('creating', (_key, row) => {
+          if (row.key === 'startup-local-recovery')
+            throw Error('Synthetic recovery preference failure');
+        });
       db.device.hook('updating', (changes) => {
         if (failBarrier && JSON.stringify(changes).includes('detached'))
           throw Error('Simulated disk full');
@@ -155,6 +168,7 @@ export async function run(which: string) {
     PersistentSession.open({
       localName,
       cloudName,
+      ...{ useLocalRecovery: recovering },
       files: {
         ...files,
         chooseRead: async () => input,
@@ -228,6 +242,88 @@ export async function run(which: string) {
   try {
     await load();
     await capture('local');
+    if (which === 'local-recovery-preference-failure') {
+      s.close();
+      recovering = true;
+      let rejected = false;
+      try {
+        s = await open();
+      } catch {
+        rejected = true;
+      }
+      assert(
+        rejected,
+        'failed recovery selection must not open a transient replacement',
+      );
+      assert(
+        (await local.device.get('startup-local-recovery')) === undefined,
+        'failed selection was not persisted',
+      );
+      assert(
+        (await local.notes.toArray())[0]?.markdown === 'local',
+        'original local notes retained',
+      );
+      assert(constructs === 0, 'failed selection never opens cloud cache');
+      return 'ok';
+    }
+    if (which === 'local-recovery-profile') {
+      const epoch = crypto.randomUUID();
+      await seedRemote('original unconfirmed cached source', epoch);
+      await remote.device.put({
+        key: 'preserve-journal',
+        value: 'unconfirmed original',
+      });
+      const before = JSON.stringify(await remote.notes.toArray());
+      user.isLoggedIn = true;
+      s.close();
+      recovering = true;
+      s = await open();
+      observe();
+      assert(
+        (await load()).items.length === 0,
+        'recovery starts separate from original local notes',
+      );
+      await capture('separate recovery note');
+      s.auth.showSignIn();
+      await s.auth.submitEmail('dev@example.invalid');
+      assert(
+        state.phase === 'code',
+        'recovery can request code without signing out original cache: ' +
+          state.error,
+      );
+      s.auth.dismiss();
+      for (let i = 0; i < 30; i++)
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      assert(
+        JSON.stringify(await remote.notes.toArray()) === before,
+        'original cached source retained through recovery cancellation',
+      );
+      assert(
+        (await remote.device.get('preserve-journal'))?.value ===
+          'unconfirmed original',
+        'original unconfirmed journal retained',
+      );
+      assert(
+        user.isLoggedIn,
+        'recovery logout must not sign out the original cache',
+      );
+      s.close();
+      recovering = false;
+      s = await open();
+      observe();
+      assert(
+        (await load()).items[0]?.markdown === 'separate recovery note',
+        'recovery selection and notes survive relaunch',
+      );
+      s.auth.showSignIn();
+      await s.auth.submitEmail('dev@example.invalid');
+      assert(
+        state.phase === 'code',
+        'remembered recovery still uses paired cloud cache',
+      );
+      s.auth.dismiss();
+      return 'ok';
+    }
     if (which === 'local-journal-cap') {
       const epoch = (await local.libraries.get('local'))!.epoch;
       // Existing never-bound profile at the former operation ceiling. Keep one
