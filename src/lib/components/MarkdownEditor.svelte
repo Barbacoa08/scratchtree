@@ -37,7 +37,7 @@
     toggleMarkdownStyle,
     formattingExtensions,
   } from '../editor/formatting';
-  import { enterKey, fencedSelection, captureUp } from '../editor/policy';
+  import { enterKey, fencedSelection, captureBoundary } from '../editor/policy';
   import { fenceCompletion } from '../editor/fences';
   let {
     contextKey,
@@ -51,6 +51,7 @@
     onfocus,
     states,
     onup,
+    onleft,
     oncontext,
     ongeometry,
   }: {
@@ -58,6 +59,7 @@
     label: string;
     states?: Map<string, EditorState>;
     onup?: () => boolean;
+    onleft?: () => boolean;
     oncontext?: (fenced: boolean) => void;
     ongeometry?: (height: number) => void;
     onsubmit: () => void;
@@ -144,7 +146,11 @@
             key: 'Shift-Enter',
             run: (v) => enterKey(v, true, readOnly, onsubmit),
           },
-          { key: 'ArrowUp', run: (v) => captureUp(v, readOnly, onup) },
+          { key: 'ArrowUp', run: (v) => captureBoundary(v, readOnly, onup) },
+          {
+            key: 'ArrowLeft',
+            run: (v) => captureBoundary(v, readOnly, onleft),
+          },
           {
             key: 'Escape',
             run: (v) => {

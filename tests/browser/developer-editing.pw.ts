@@ -140,7 +140,8 @@ test('capture Up at zero selects last visible note, skips child tree, and retain
   await capture(page).focus();
   await capture(page).press('Meta+Home');
   await capture(page).press('ArrowUp');
-  await expect(capture(page)).toBeFocused();
+  await expect(stream(page)).toBeFocused();
+  await expect(page.getByRole('searchbox')).toHaveValue('no result');
   await page.getByRole('button', { name: 'Root', exact: true }).click();
   await page.keyboard.press('Meta+n');
   await capture(page).fill('child draft');
@@ -150,6 +151,132 @@ test('capture Up at zero selects last visible note, skips child tree, and retain
   await page.keyboard.insertText('Q');
   await capture(page).press('Meta+z');
   await expect(capture(page)).toHaveText('draft');
+});
+for (const key of ['ArrowUp', 'ArrowLeft']) {
+  test(`${key} at capture start focuses an empty tree stream before parent navigation and retains draft history`, async ({
+    page,
+  }) => {
+    await seed(page, []);
+    await page.keyboard.press('Meta+n');
+    const owner = await page.evaluate(
+      () => (window as any).__test.controller.state.ownerId,
+    );
+    await capture(page).fill('draft');
+    await capture(page).press('Meta+Home');
+    await capture(page).press(key);
+    await expect(stream(page)).toBeFocused();
+    expect(
+      await page.evaluate(
+        () => (window as any).__test.controller.state.ownerId,
+      ),
+    ).toBe(owner);
+    await page.keyboard.press('Space');
+    await page.keyboard.insertText('X');
+    await expect(capture(page)).toHaveText('Xdraft');
+    await capture(page).press('Meta+z');
+    await expect(capture(page)).toHaveText('draft');
+    await capture(page).press(key);
+    await expect(stream(page)).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator(`[data-entry-id="${owner}"]`)).toHaveClass(
+      /selected/,
+    );
+    await page.keyboard.press('ArrowRight');
+    await expect(capture(page)).toBeFocused();
+    await expect(capture(page)).toHaveText('draft');
+    await page.keyboard.insertText('Y');
+    await expect(capture(page)).toHaveText('Ydraft');
+  });
+  test(`${key} at zero handles empty Root, Trash, and search without losing context`, async ({
+    page,
+  }) => {
+    await seed(page, []);
+    for (const scope of ['Root', 'Trash']) {
+      await page.getByRole('button', { name: scope, exact: true }).click();
+      await capture(page).focus();
+      await capture(page).press(key);
+      await expect(stream(page)).toBeFocused();
+      await page.keyboard.press('ArrowLeft');
+      await expect(stream(page)).toBeFocused();
+      expect(
+        await page.evaluate(
+          () => (window as any).__test.controller.state.location.scope,
+        ),
+      ).toBe(scope === 'Root' ? 'live' : 'trash');
+    }
+    await page.getByRole('button', { name: 'Root', exact: true }).click();
+    await capture(page).fill('saved note');
+    await capture(page).press('Enter');
+    await page.getByRole('searchbox').fill('no match');
+    await capture(page).fill('retained draft');
+    await capture(page).press('Meta+Home');
+    await capture(page).press(key);
+    await expect(stream(page)).toBeFocused();
+    await expect(page.getByRole('searchbox')).toHaveValue('no match');
+    await expect(capture(page)).toHaveText('retained draft');
+  });
+  test(`${key} leaves nonzero carets, selections, and modified input in the empty composer`, async ({
+    page,
+  }) => {
+    await seed(page, []);
+    await capture(page).fill('draft');
+    await capture(page).press('End');
+    await capture(page).press(key);
+    await expect(capture(page)).toBeFocused();
+    await capture(page).press('Meta+a');
+    await capture(page).press(key);
+    await expect(capture(page)).toBeFocused();
+    await capture(page).press('Meta+Home');
+    for (const modifier of ['Shift', 'Meta', 'Alt', 'Control']) {
+      await capture(page).press(`${modifier}+${key}`);
+      await expect(capture(page)).toBeFocused();
+      await capture(page).press('Meta+Home');
+    }
+    await expect(capture(page)).toHaveText('draft');
+  });
+}
+test('boundary arrows keep a tree-only stream in the composer', async ({
+  page,
+}) => {
+  await seed(page, []);
+  await page.evaluate(async () => {
+    const t = (window as any).__test;
+    const id = crypto.randomUUID();
+    await t.repo.createChildTree({
+      id,
+      parent: { scope: 'live', itemId: null },
+    });
+    await t.repo.captureItem({
+      id: crypto.randomUUID(),
+      location: { scope: 'live', itemId: id },
+      markdown: 'child',
+      draft: { key: `compose:${id}`, revision: 0 },
+    });
+    await t.controller.start();
+  });
+  await capture(page).fill('draft');
+  await capture(page).press('Meta+Home');
+  for (const key of ['ArrowUp', 'ArrowLeft']) {
+    await capture(page).press(key);
+    await expect(capture(page)).toBeFocused();
+  }
+  await expect(capture(page)).toHaveText('draft');
+});
+test('capture Left keeps nonempty streams and inline editing in their editors', async ({
+  page,
+}) => {
+  await seed(page, ['note']);
+  await capture(page).fill('draft');
+  await capture(page).press('Meta+Home');
+  await capture(page).press('ArrowLeft');
+  await expect(capture(page)).toBeFocused();
+  await page.getByRole('article', { name: 'Saved note' }).click();
+  await page.keyboard.press('e');
+  await inline(page).press('Meta+Home');
+  await inline(page).press('ArrowLeft');
+  await expect(inline(page)).toBeFocused();
+  await inline(page).press('ArrowUp');
+  await expect(inline(page)).toBeFocused();
 });
 for (const large of [false, true])
   test(`note bounds and actual edit growth survive acknowledgment at 150%=${large}`, async ({
