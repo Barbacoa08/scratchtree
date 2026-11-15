@@ -3,7 +3,7 @@
 </script>
 
 <p {id} class="auth-instruction">
-  macOS Keychain protects the device key that keeps you signed in. If a system
-  prompt asks for access to a “WebCrypto Master Key,” finish it in macOS to
-  continue.
+  Scratchtree uses a protected key on this Mac to keep you signed in. macOS may
+  ask permission to use that key. This permission applies to Scratchtree’s
+  sign-in key, not your entire Keychain.
 </p>

@@ -306,7 +306,7 @@ test('slow native startup explains system permission without taking newer focus'
       const originalOpen = PersistentSession.open.bind(PersistentSession);
       PersistentSession.open = async options => {
         await options.beforeOpenCloudCache?.();
-        window.__noticeBeforeOpen = Array.from(document.querySelectorAll('p')).some(node => node.textContent.includes('macOS Keychain protects'));
+        window.__noticeBeforeOpen = Array.from(document.querySelectorAll('p')).some(node => node.textContent.includes('Scratchtree uses a protected key'));
         await new Promise(resolve => { window.__releaseStartup = resolve; });
         return originalOpen(options);
       };
@@ -316,7 +316,9 @@ test('slow native startup explains system permission without taking newer focus'
   await page.goto('/');
   const opening = page.getByRole('region', { name: 'Opening notes' });
   await expect(opening.getByRole('status')).toHaveText('Opening your notes…');
-  await expect(opening.getByText(/macOS Keychain protects/)).toBeVisible();
+  await expect(
+    opening.getByText(/Scratchtree uses a protected key/),
+  ).toBeVisible();
   expect(await page.evaluate(() => (window as any).__noticeBeforeOpen)).toBe(
     true,
   );

@@ -751,10 +751,11 @@ test('native sign-in explains the Keychain request before sending a code', async
     await page.getByRole('radio', { name: theme, exact: true }).check();
     await page.getByRole('button', { name: 'Sign in / sign up' }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText(/macOS Keychain protects/)).toBeVisible();
-    await expect(dialog.getByText(/WebCrypto Master Key/)).toBeVisible();
+    const explanation =
+      'Scratchtree uses a protected key on this Mac to keep you signed in. macOS may ask permission to use that key. This permission applies to Scratchtree’s sign-in key, not your entire Keychain.';
+    await expect(dialog.getByText(explanation, { exact: true })).toBeVisible();
     await expect(dialog.getByLabel('Email')).toHaveAccessibleDescription(
-      /macOS Keychain protects.*WebCrypto Master Key/,
+      explanation,
     );
     await expect(dialog.getByLabel('Email')).toBeFocused();
     expect(
@@ -776,6 +777,6 @@ test('browser sign-in does not claim a macOS permission will appear', async ({
   await page.goto('/?fixture&authFixture');
   await page.getByRole('button', { name: 'Sign in / sign up' }).click();
   await expect(
-    page.getByRole('dialog').getByText(/macOS Keychain/),
+    page.getByRole('dialog').getByText(/Scratchtree uses a protected key/),
   ).toHaveCount(0);
 });
