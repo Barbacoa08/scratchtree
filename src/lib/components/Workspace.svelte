@@ -13,6 +13,14 @@
   import Icon from './Icon.svelte';
   import TreeSidebar from './TreeSidebar.svelte';
   import ThemeSelector from './ThemeSelector.svelte';
+  import SignInDialog from './SignInDialog.svelte';
+  import SyncStatus from './SyncStatus.svelte';
+  import type {
+    AuthPort,
+    AuthState,
+    SyncPort,
+    SyncState,
+  } from '../sync/service-types';
   import type { AppearancePreference } from '../platform/appearance';
   import {
     composeKey,
@@ -37,7 +45,7 @@
     type MouseSelection,
   } from '../workspace/mouse-selection';
   import { WorkspaceController, type ViewState } from '../workspace/controller';
-  import { nativeRepository, type Repository } from '../platform/workspace';
+  import type { Repository } from '../platform/workspace';
   import { copyMarkdown, openExternal } from '../platform/actions';
   import { filterNotes } from '../domain/search';
   import { timestampPresentation } from '../domain/timestamps';
@@ -45,18 +53,43 @@
   import { nativeCloseAdapter } from '../platform/native-lifecycle';
   import { attachMouseHistory } from '../platform/mouse-history';
   let {
-    repository = nativeRepository,
+    repository,
+    auth,
+    sync,
     onready,
     windowAdapter,
     appearance = 'system',
     onappearancechange = () => {},
   }: {
-    repository?: Repository;
+    repository: Repository;
+    auth?: AuthPort;
+    sync?: SyncPort;
     windowAdapter?: CloseAdapter;
     appearance?: AppearancePreference;
     onappearancechange?: (preference: AppearancePreference) => void;
     onready?: (controller: WorkspaceController) => void;
   } = $props();
+  let authState = $state<AuthState>({
+    phase: 'signed-out',
+    open: false,
+    email: '',
+    error: null,
+    canCancel: true,
+    authenticated: false,
+    configured: false,
+  });
+  let syncState = $state<SyncState>({
+    state: 'local-only',
+    lastConfirmed: null,
+    detail: null,
+    recoveries: 0,
+  });
+  let syncAttention = $state(false);
+  let recoveryModal = $state(false);
+  let authTrigger = $state<HTMLButtonElement>();
+  let dialogWasOpen = false;
+  let signOutError = $state<string | null>(null);
+  let signOutRetry = $state<HTMLButtonElement>();
   const controller = new WorkspaceController(untrack(() => repository));
   let viewState: ViewState = $state(controller.state);
   let mouseSelection = $state<MouseSelection>(emptyMouseSelection());
@@ -257,7 +290,7 @@
       : viewState.snapshot.items.find((x) => x.id === viewState.ownerId),
   );
   let destination = $derived(locationHierarchy.label(viewState.ownerId).text);
-  const editorStates = new Map<string, EditorState>();
+  let editorStates = $state.raw(new Map<string, EditorState>());
   const focusRequestCleanups = new Set<() => void>();
   let disposed = false;
   let visibleNotes = $derived(
@@ -296,7 +329,14 @@
         mouseSelection = next;
     });
   });
-  let modal = $derived(!!viewState.preview || closeFailed || !!moveSession);
+  let modal = $derived(
+    !!viewState.preview ||
+      closeFailed ||
+      !!moveSession ||
+      authState.open ||
+      authState.phase === 'signing-out' ||
+      recoveryModal,
+  );
   let blocked = $derived(
     (viewState.operation !== null && viewState.operation !== 'save') || modal,
   );
@@ -432,11 +472,51 @@
     node.focus();
   }
   onMount(() => {
+    const unsubscribeAuth = auth?.subscribe((next) => {
+      const closed = dialogWasOpen && !next.open;
+      if (authState.phase === 'signing-out' && next.phase !== 'signing-out') {
+        signOutError = next.authenticated ? next.error : null;
+        void tick().then(() => {
+          if (
+            !blocked &&
+            (document.activeElement === document.body ||
+              document.activeElement === authTrigger)
+          ) {
+            if (signOutError) signOutRetry?.focus();
+            else authTrigger?.focus();
+          }
+        });
+      } else if (next.phase === 'signing-out') signOutError = null;
+      dialogWasOpen = next.open;
+      authState = next;
+      if (closed) void tick().then(() => authTrigger?.focus());
+    });
+    const unsubscribeSync = sync?.subscribe((next) => {
+      syncState = next;
+    });
     const detachMouseHistory = attachMouseHistory(window, traverseHistory);
     reorderMotion = createReorderMotion(() => stream);
     let previous = controller.state;
     navigation.reset(previous.location);
     const unsubscribe = controller.subscribe((next) => {
+      const replaced = next.cacheGeneration !== previous.cacheGeneration;
+      if (replaced) {
+        editorStates = new Map();
+        editHeights = {};
+        expandedNotes = {};
+        composerEpochs = {};
+        selectedEditingContext = null;
+        paletteRetry = null;
+        undoRetry = null;
+        captureRetry = null;
+        palette = null;
+        moveSession = null;
+        selection.clear();
+        setSelected('');
+        clearDrag();
+        workspaceEpoch++;
+        navigation.reset(next.location);
+      }
       const locationChanged =
         next.location.scope !== previous.location.scope ||
         next.location.itemId !== previous.location.itemId;
@@ -476,7 +556,11 @@
       }
       // Subscribe sees each patch synchronously; Svelte effects can coalesce the
       // operation/location/finally patches and lose the structural cause.
-      if (locationChanged && next.operation !== 'navigation-reconcile') {
+      if (
+        !replaced &&
+        locationChanged &&
+        next.operation !== 'navigation-reconcile'
+      ) {
         const structural =
           next.operation === 'delete' ||
           next.operation === 'purge' ||
@@ -619,6 +703,8 @@
       document.removeEventListener('focusout', forgetFocus);
       detailsMedia.removeEventListener('change', respondToDetailsWidth);
       detach();
+      unsubscribeAuth?.();
+      unsubscribeSync?.();
       unsubscribe();
       controller.dispose();
     };
@@ -1595,8 +1681,12 @@
       stream?.focus();
     }
   }
-  function toggleDetails() {
-    if (detailsOpen && detailsRail?.contains(document.activeElement))
+  function toggleDetails(event: MouseEvent) {
+    // Real pointer activation owns focus; synthetic toggles retain newer focus.
+    if (
+      event.detail > 0 ||
+      (detailsOpen && detailsRail?.contains(document.activeElement))
+    )
       detailsToggle?.focus();
     detailsChoice = !detailsOpen;
     detailsOpen = detailsChoice;
@@ -1667,11 +1757,29 @@
     class:sr-only={compact &&
       !viewState.error &&
       !viewState.completionRetry &&
-      !viewState.mutationRetry}
+      !viewState.mutationRetry &&
+      !(
+        sync &&
+        (syncState.state === 'needs-sync' ||
+          syncState.detail ||
+          syncState.recoveries ||
+          syncState.overflow ||
+          syncAttention)
+      )}
     aria-label="Editor status"
   >
-    <h2 class:sr-only={compact}><Icon name="info" /> Local activity</h2>
-    {#if !compact}<p>Notes and drafts on this Mac.</p>{/if}
+    <h2 class:sr-only={compact}><Icon name="info" /> Status</h2>
+    {#if !compact}<p>
+        {authState.authenticated
+          ? 'Local saves and cloud sync.'
+          : 'Notes and drafts on this Mac.'}
+      </p>{/if}
+    {#if sync && (!compact || syncState.state === 'needs-sync' || syncState.detail || syncState.recoveries || syncState.overflow || syncAttention)}<SyncStatus
+        {sync}
+        value={syncState}
+        onattentionchange={(active) => (syncAttention = active)}
+        onmodalchange={(active) => (recoveryModal = active)}
+      />{/if}
     <p role="status" aria-live="polite">{viewState.status}</p>
     <p role="alert">{viewState.error}</p>
     {#if paletteRetry && viewState.mutationRetry && paletteRetry.epoch === workspaceEpoch && paletteRetry.identity === controller.mutationRetryIdentity}
@@ -1760,8 +1868,18 @@
     <section aria-label="Library loading">
       <p role="status">{viewState.status}</p>
       {#if viewState.error}<p role="alert">{viewState.error}</p>
-        <button onclick={() => controller.start()}>Retry loading library</button
-        >{/if}
+        {#if !syncState.readOnlyRecovery}<button
+            onclick={() => controller.start()}>Retry loading library</button
+          >{/if}
+      {/if}
+      {#if sync && (syncState.overflow || syncAttention)}
+        <SyncStatus
+          {sync}
+          value={syncState}
+          onattentionchange={(active) => (syncAttention = active)}
+          onmodalchange={(active) => (recoveryModal = active)}
+        />
+      {/if}
     </section>
   {:else}
     <div class="workspace" class:details-open={detailsOpen}>
@@ -1820,6 +1938,51 @@
               ? ''
               : undefined}><Icon name="undo" /> Undo delete</button
           >
+        </div>
+        <div class="auth-footer">
+          <button
+            bind:this={authTrigger}
+            disabled={!auth ||
+              !authState.configured ||
+              authState.phase === 'signing-out' ||
+              blocked}
+            data-unavailable={!auth || !authState.configured ? '' : undefined}
+            title={!auth || !authState.configured
+              ? 'Sign in is not configured'
+              : undefined}
+            aria-describedby={!auth || !authState.configured
+              ? 'auth-unavailable'
+              : undefined}
+            onclick={() => {
+              if (
+                blocked ||
+                !auth ||
+                !authState.configured ||
+                authState.phase === 'signing-out'
+              )
+                return;
+              if (authState.authenticated) void auth.signOut();
+              else auth.showSignIn();
+            }}
+            ><Icon name="account" />
+            {authState.authenticated ? 'Sign out' : 'Sign in / sign up'}</button
+          >
+          {#if authState.phase === 'signing-out'}
+            <p role="status">Signing out…</p>
+          {/if}
+          {#if signOutError && !authState.open}
+            <p role="alert">{signOutError}</p>
+            <button
+              type="button"
+              bind:this={signOutRetry}
+              disabled={blocked}
+              onclick={() => void auth?.signOut()}>Retry sign out</button
+            >
+          {/if}
+          {#if !auth || !authState.configured}<span
+              id="auth-unavailable"
+              class="auth-unavailable">Sign in is not configured.</span
+            >{/if}
         </div>
         <ThemeSelector preference={appearance} onchange={onappearancechange} />
       </aside>
@@ -2217,3 +2380,9 @@
     oncancel={cancelMove}
   />
 {/if}
+
+{#if auth && authState.open}<SignInDialog
+    {auth}
+    value={authState}
+    native={nativeChrome}
+  />{/if}

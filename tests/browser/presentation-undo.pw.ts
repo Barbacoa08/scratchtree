@@ -58,13 +58,13 @@ async function workspaceZ(
   }, overrides);
 }
 
-test('concise local activity retains actual live status and error recovery', async ({
+test('concise Status retains actual live status and error recovery', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1400, height: 800 });
   await seed(page);
   const status = page.getByRole('region', { name: 'Editor status' });
-  await expect(status.getByRole('heading')).toHaveText('Local activity');
+  await expect(status.getByRole('heading')).toHaveText('Status');
   await expect(status).toContainText('Notes and drafts on this Mac.');
   await capture(page).fill('retained local draft');
   await page.evaluate(() => {
@@ -279,10 +279,11 @@ test('document selection, palette, modal, busy state, and focused controls retai
   expect(await marker(page)).toEqual([ids[0]]);
   await page.evaluate(() => {
     (window as any).__test.repo.restoreText = JSON.stringify({
-      format: 'scratchtree-alpha',
-      version: 7,
+      format: 'scratchtree',
+      version: 8,
       exportedAt: '2026-11-12T00:00:00.000Z',
-      library: { items: [], drafts: [], undoDeleteIds: [] },
+      library: { items: [], purgedIds: [] },
+      device: { drafts: [], undoDeleteIds: [], recovery: [] },
     });
   });
   await page

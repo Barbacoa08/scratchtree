@@ -1,8 +1,9 @@
+import { backupFixture } from '../fixtures/backup';
 import { expect, it, vi } from 'vitest';
 import { MemoryRepository } from '../fixtures/memory';
 import { WorkspaceController } from '../../src/lib/workspace/controller';
 import { item } from '../fixtures/items';
-import { encodeBackup, validateBackup } from '../../src/lib/domain/backup';
+import { encodeBackup, validateBackup } from '../fixtures/backup';
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const trash = { scope: 'trash' as const, itemId: null };
@@ -16,9 +17,9 @@ it('M to Trash installs one ordered persistent action and one Undo restores nonc
   const move = c.captureMove([id(3), id(1)], trash, 0);
   expect(await c.moveItems(move)).toBe(true);
   expect(repo.snapshot.undoDeleteIds).toEqual([id(1), id(3)]);
-  expect(JSON.parse(encodeBackup(repo.snapshot)).version).toBe(7);
+  expect(JSON.parse(encodeBackup(repo.snapshot)).version).toBe(8);
   expect(validateBackup(encodeBackup(repo.snapshot))).toHaveProperty(
-    'library.undoDeleteIds',
+    'device.undoDeleteIds',
     [id(1), id(3)],
   );
   expect(await c.undoRemove()).toBe(true);
@@ -31,28 +32,20 @@ it('M to Trash installs one ordered persistent action and one Undo restores nonc
   ).toEqual([id(1), id(2), id(3)]);
   expect(repo.snapshot.items[0].markdown).toBe('**1**\r\n');
 });
-it('version 7 rejects invalid ordered group fields', () => {
+it('version 8 rejects invalid ordered group fields', () => {
   const workspace = {
     items: [item({ id: id(1), deletedAt: 3 })],
     drafts: [],
     undoDeleteIds: [id(1)],
   };
-  const backup = {
-    format: 'scratchtree-alpha',
-    version: 7,
-    exportedAt: '2026-11-12T00:00:00.000Z',
-    library: workspace,
-  };
-  expect(validateBackup(JSON.stringify(backup))).toHaveProperty(
-    'library',
-    workspace,
-  );
+  const backup = backupFixture(workspace, '2026-11-12T00:00:00.000Z');
+  expect(validateBackup(JSON.stringify(backup))).toEqual(backup);
   for (const undoDeleteIds of [null, id(1), [id(1), id(1)], [id(2)]])
     expect(
       validateBackup(
         JSON.stringify({
           ...backup,
-          library: { ...workspace, undoDeleteIds },
+          device: { ...backup.device, undoDeleteIds },
         }),
       ),
     ).toHaveProperty('code');

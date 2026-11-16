@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 const output = process.argv[2];
 if (!output)
-  throw new Error('Supply an output path for a synthetic BackupV7 file.');
+  throw new Error('Supply an output path for a synthetic BackupV8 file.');
 const items = Array.from({ length: 1000 }, (_, i) => {
   const id = `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`;
   const head = `Synthetic note ${String(i + 1).padStart(4, '0')} **visible**\n`;
@@ -23,10 +23,11 @@ const items = Array.from({ length: 1000 }, (_, i) => {
 writeFileSync(
   output,
   JSON.stringify({
-    format: 'scratchtree-alpha',
-    version: 7,
+    format: 'scratchtree',
+    version: 8,
     exportedAt: new Date().toISOString(),
-    library: { items, drafts: [], undoDeleteIds: [] },
+    library: { items, purgedIds: [] },
+    device: { drafts: [], undoDeleteIds: [], recovery: [] },
   }),
 );
 console.log(`Wrote 999 × 1 KiB notes and one 128 KiB note to ${output}`);

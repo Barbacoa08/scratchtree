@@ -447,10 +447,15 @@ test('expansion uses exact note identity across filters and survives deletion/Un
   await page.evaluate(() => {
     const t = (window as any).__test;
     t.repo.restoreText = JSON.stringify({
-      format: 'scratchtree-alpha',
-      version: 7,
+      format: 'scratchtree',
+      version: 8,
       exportedAt: '2026-11-11T00:00:00.000Z',
-      library: t.repo.snapshot,
+      library: { items: t.repo.snapshot.items, purgedIds: [] },
+      device: {
+        drafts: t.repo.snapshot.drafts,
+        undoDeleteIds: t.repo.snapshot.undoDeleteIds,
+        recovery: [],
+      },
     });
   });
   await page
