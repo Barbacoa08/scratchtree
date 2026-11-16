@@ -18,7 +18,8 @@ import type {
   UndoDeleteRequest,
 } from '../../src/lib/platform/workspace';
 import type { ColorToken, Location } from '../../src/lib/domain/notes';
-import { validateBackup, encodeBackup } from '../../src/lib/domain/backup';
+import { validateBackup, backupFixture } from './backup';
+import type { BackupV8 } from '../../src/lib/sync/backup';
 export class MemoryRepository implements Repository {
   snapshot = emptyWorkspace();
   fail: string | null = null;
@@ -30,6 +31,17 @@ export class MemoryRepository implements Repository {
   restoreText: string | null = null;
   exported: string | null = null;
   staged: WorkspaceSnapshot | null = null;
+  private extras = {
+    purgedIds: [] as string[],
+    recovery: [] as BackupV8['device']['recovery'],
+  };
+  private stagedExtras: typeof this.extras | null = null;
+  private envelope(s: WorkspaceSnapshot, extras = this.extras) {
+    const backup = backupFixture(s);
+    backup.library.purgedIds = extras.purgedIds;
+    backup.device.recovery = extras.recovery;
+    return backup;
+  }
   cancelExport = false;
   cancelRestore = false;
   private check(op: string) {
@@ -39,10 +51,11 @@ export class MemoryRepository implements Repository {
         message: 'Synthetic local ' + op + ' failure. Retry.',
       };
   }
-  private commit(s: WorkspaceSnapshot) {
-    const checked = validateBackup(encodeBackup(s));
+  private commit(s: WorkspaceSnapshot, extras = this.extras) {
+    const checked = validateBackup(JSON.stringify(this.envelope(s, extras)));
     if ('code' in checked) throw checked;
     this.snapshot = structuredClone(s);
+    this.extras = structuredClone(extras);
     return structuredClone(s);
   }
   async loadWorkspace() {
@@ -62,7 +75,7 @@ export class MemoryRepository implements Repository {
     const probe = structuredClone(s);
     probe.drafts = probe.drafts.filter((d) => d.key !== key);
     probe.drafts.push({ key, markdown, revision, updatedAt: Date.now() });
-    const valid = validateBackup(encodeBackup(probe));
+    const valid = validateBackup(JSON.stringify(this.envelope(probe)));
     if ('code' in valid) throw valid;
     const old = s.drafts.find((d) => d.key === key);
     if (!old || revision > old.revision) {
@@ -142,7 +155,7 @@ export class MemoryRepository implements Repository {
   async exportBackup() {
     this.check('export');
     if (this.cancelExport) return null;
-    this.exported = encodeBackup(this.snapshot);
+    this.exported = JSON.stringify(this.envelope(this.snapshot));
     return 'synthetic-backup.json';
   }
   async previewRestore(): Promise<RestorePreview | null> {
@@ -150,11 +163,19 @@ export class MemoryRepository implements Repository {
     if (this.cancelRestore || !this.restoreText) return null;
     const b = validateBackup(this.restoreText);
     if ('code' in b) throw b;
-    this.staged = b.library;
+    this.staged = {
+      items: b.library.items,
+      drafts: b.device.drafts,
+      undoDeleteIds: b.device.undoDeleteIds,
+    };
+    this.stagedExtras = {
+      purgedIds: b.library.purgedIds,
+      recovery: b.device.recovery,
+    };
     return {
       token: 'synthetic-token',
       notes: b.library.items.length,
-      drafts: b.library.drafts.length,
+      drafts: b.device.drafts.length,
       trees: b.library.items.filter((x) => x.kind === 'tree').length,
       warning:
         'Replace the entire local library, including Trash and drafts. A safety backup will be written first.',
@@ -164,11 +185,13 @@ export class MemoryRepository implements Repository {
     this.check('restore');
     if (!confirm) {
       this.staged = null;
+      this.stagedExtras = null;
       return null;
     }
     if (!this.staged) throw Error('No preview');
-    const s = this.commit(this.staged);
+    const s = this.commit(this.staged, this.stagedExtras ?? undefined);
     this.staged = null;
+    this.stagedExtras = null;
     return s;
   }
 }

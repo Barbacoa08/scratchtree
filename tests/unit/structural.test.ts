@@ -1,6 +1,7 @@
+import { backupFixture } from '../fixtures/backup';
 import { expect, it } from 'vitest';
 import { MemoryRepository } from '../fixtures/memory';
-import { encodeBackup, validateBackup } from '../../src/lib/domain/backup';
+import { encodeBackup, validateBackup } from '../fixtures/backup';
 import { restoreItem } from '../../src/lib/domain/items';
 import { WorkspaceController } from '../../src/lib/workspace/controller';
 import type {
@@ -72,8 +73,8 @@ it('current contract retains independent note composer and restore references', 
   ];
   s.undoDeleteIds = [id(2)];
   const text = encodeBackup(s);
-  expect(JSON.parse(text).version).toBe(7);
-  expect(validateBackup(text)).toHaveProperty('library', s);
+  expect(JSON.parse(text).version).toBe(8);
+  expect(validateBackup(text)).toEqual(backupFixture(s));
 });
 it('purge retains independent roots and unrelated Undo, repairs restore refs, and exactly replays', async () => {
   const r = new MemoryRepository();

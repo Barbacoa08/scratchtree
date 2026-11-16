@@ -2,7 +2,6 @@ import {
   MAX_SOURCE,
   MAX_ENVELOPE,
   COLORS,
-  type BackupV7,
   type WorkspaceSnapshot,
   type AppError,
   type Item,
@@ -22,27 +21,9 @@ export const uuid = (v: unknown): v is string =>
 const invalid = (
   message = 'Invalid library fields or references.',
 ): AppError => ({ code: 'invalid_backup', message });
-export function validateBackup(text: string): BackupV7 | AppError {
-  if (bytes(text) > MAX_ENVELOPE)
-    return invalid('Backup exceeds the 10 MiB capacity.');
-  let b: unknown;
-  try {
-    b = JSON.parse(text);
-  } catch {
-    return invalid('Backup must be valid JSON.');
-  }
-  if (
-    !record(b) ||
-    !fields(b, ['format', 'version', 'exportedAt', 'library']) ||
-    b.format !== 'scratchtree-alpha' ||
-    b.version !== 7 ||
-    typeof b.exportedAt !== 'string' ||
-    !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(b.exportedAt) ||
-    !Number.isFinite(Date.parse(b.exportedAt)) ||
-    new Date(b.exportedAt).toISOString() !== b.exportedAt
-  )
-    return invalid();
-  const s = b.library;
+/** Validate an in-memory snapshot independently of any backup file format. */
+export function validateSnapshot(value: unknown): WorkspaceSnapshot | AppError {
+  const s = value;
   if (
     !record(s) ||
     !fields(s, ['items', 'drafts', 'undoDeleteIds']) ||
@@ -148,17 +129,9 @@ export function validateBackup(text: string): BackupV7 | AppError {
     s.undoDeleteIds.some((id) => !uuid(id) || index.get(id)?.deletedAt == null)
   )
     return invalid();
-  if (bytes(JSON.stringify(b)) > MAX_ENVELOPE)
+  if (bytes(JSON.stringify(s)) > MAX_ENVELOPE)
     return invalid(
       'Backup exceeds the 10 MiB capacity. The original is retained.',
     );
-  return b as unknown as BackupV7;
-}
-export function encodeBackup(library: WorkspaceSnapshot): string {
-  return JSON.stringify({
-    format: 'scratchtree-alpha',
-    version: 7,
-    exportedAt: new Date().toISOString(),
-    library,
-  });
+  return s as unknown as WorkspaceSnapshot;
 }

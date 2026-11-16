@@ -590,8 +590,8 @@ test('current backup round trip retains one persistent group Undo action', async
   const backup = await page.evaluate(() =>
     JSON.parse((window as any).__test.repo.exported),
   );
-  expect(backup.version).toBe(7);
-  expect(backup.library.undoDeleteIds).toEqual([ids[0], ids[2]]);
+  expect(backup.version).toBe(8);
+  expect(backup.device.undoDeleteIds).toEqual([ids[0], ids[2]]);
   expect(backup.library).not.toHaveProperty('undoDeleteId');
   await page.evaluate(() => {
     const t = (window as any).__test;

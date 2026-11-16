@@ -408,7 +408,7 @@ it('library restore replaces stale contexts and reopens scoped capture drafts at
       'restored tree source\r\n',
       9,
     );
-    const { encodeBackup } = await import('../../src/lib/domain/backup');
+    const { encodeBackup } = await import('../fixtures/backup');
     repo.restoreText = encodeBackup(restored.snapshot);
     await c.previewRestore();
     expect(c.state.preview?.trees).toBe(1);

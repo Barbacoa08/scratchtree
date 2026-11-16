@@ -1,3 +1,5 @@
+import { version as appVersion } from '../../../package.json';
+
 /** Local diagnostics exclude messages and arbitrary stack text. */
 const storageKey = 'scratchtree.preview.client-errors.v1';
 const names = new Set([
@@ -23,7 +25,6 @@ const sourceModules = new Set([
   'src/lib/domain/notes.ts',
   'src/lib/domain/search.ts',
   'src/lib/domain/timestamps.ts',
-  'src/lib/domain/backup.ts',
   'src/lib/platform/workspace.ts',
   'src/lib/platform/actions.ts',
   'src/lib/platform/lifecycle.ts',
@@ -32,7 +33,7 @@ const sourceModules = new Set([
 const productionModule =
   /^_app\/immutable\/(?:chunks\/[A-Za-z0-9_-]{8}|nodes\/\d+\.[A-Za-z0-9_-]{8}|entry\/(?:app|start|payload)\.[A-Za-z0-9_-]{8})\.js$/;
 export interface ClientDiagnostic {
-  readonly version: '0.1.0';
+  readonly version: string;
   readonly reference: string;
   readonly time: string;
   readonly name: string;
@@ -103,7 +104,7 @@ function previous(
   if (!value || typeof value !== 'object') return;
   const record = value as Record<string, unknown>;
   if (
-    record.version !== '0.1.0' ||
+    record.version !== appVersion ||
     typeof record.reference !== 'string' ||
     !/^ST-[A-F0-9]{16}$/.test(record.reference) ||
     typeof record.time !== 'string' ||
@@ -120,7 +121,7 @@ function previous(
   )
     return;
   return {
-    version: '0.1.0',
+    version: appVersion,
     reference: record.reference,
     time: record.time,
     name: record.name,
@@ -181,7 +182,7 @@ export function captureDiagnostic(
   const loaded = loadedModules();
   const name = property(error, 'name');
   const record: ClientDiagnostic = {
-    version: '0.1.0',
+    version: appVersion,
     reference,
     time,
     name: typeof name === 'string' && names.has(name) ? name : 'Error',

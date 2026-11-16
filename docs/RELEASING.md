@@ -1,8 +1,8 @@
 # Mac preview releases
 
-Scratchtree currently installs through an Apple Silicon DMG published as a GitHub prerelease. Releases are manual; there is no automatic updater. The alpha uses local notes only, with no accounts or synchronization. [README.md](../README.md#download-and-install) is the user-facing installation guide.
+Scratchtree currently installs through an Apple Silicon DMG published as a GitHub prerelease. Releases are manual; there is no automatic updater. The published alpha.5 uses local notes only; current source adds private-account Dexie Cloud synchronization. State the behavior of the exact installer being released, and do not infer publication authorization from source implementation. [README.md](../README.md#download-and-install) is the user-facing installation guide.
 
-The alpha is ad-hoc signed, **not Developer ID signed or notarized**. Production signing, credentials, notarization, Intel builds, and other platforms require separate decisions. The current native identifier is `tech.barbajoe.scratchtree.preview`; data is stored separately from the application bundle. Alpha changes may break identity or format compatibility, but using actual notes requires a deliberate private backup and transfer plan first.
+The alpha is ad-hoc signed, **not Developer ID signed or notarized**. Production signing, credentials, notarization, Intel builds, and other platforms require separate decisions. The permanent release identifier is `tech.barbajoe.scratchtree`; data is stored separately from the application bundle. Alpha changes may break identity or format compatibility, but using actual notes requires a deliberate private backup and transfer plan first.
 
 ## Scope and prerequisites
 
@@ -10,19 +10,19 @@ The alpha is ad-hoc signed, **not Developer ID signed or notarized**. Production
 - Confirm the current task authorizes publishing a release. Code approval, a merged PR, or a past release does not grant standing publication or credential access. If publication is already authorized, complete the verified release without asking again.
 - Use the README's pinned Node, pnpm, and Rust versions, macOS command-line build prerequisites, the `aarch64-apple-darwin` Rust target, Python 3 for the checks below, and authenticated GitHub CLI access to `Barbacoa08/scratchtree`. Select the toolchains in the shell before running Tauri's child commands. Do not depend on another worktree's ignored toolchain/cache paths.
 - Start from a clean, freshly fetched, verified release commit, normally merged `origin/main`, in an isolated worktree. Record commit/tree IDs, tool versions, architecture, commands, outcomes, and omissions in a dated ignored `.projects/` task folder.
-- Never use an original third-party application profile or bundle personal notes, SQLite files, backups, exports, private captures, credentials, or scratch directories. New installations start empty. Do not launch against an existing user profile merely to package the installer.
+- Never use an original third-party application profile or bundle personal notes, IndexedDB/SQLite profiles, backups, exports, private captures, credentials, or scratch directories. New installations start empty. Do not launch against an existing user profile merely to package the installer.
 
 For a prose-only PR, documentation checks are sufficient and no new installer is needed. For a runtime release, verify the selected source under the contributor guide, and record the applicable packaged native checks and their limits. If a squash merge leaves the complete tracked tree identical to the tested PR head, retain both identities and the verified tree equality; do not imply a fresh test run occurred. Build the release afresh from the selected clean commit.
 
 ## Build and stage an immutable application
 
-The shell examples assume the repository root and one continuing shell. Keep error checking enabled so a failed build cannot fall through to packaging a cached artifact. Choose an unused release tag before running them; the `N` below is a placeholder, not the next release number. Never overwrite an existing tag or release asset. Check the actual release list first.
+The shell examples assume the repository root and one continuing shell. Keep error checking enabled so a failed build cannot fall through to packaging a cached artifact. Choose an explicitly approved, unused release tag before running them; the example below uses `v0.2.0`. Never overwrite an existing tag or release asset. Check the actual release list first.
 
 ```sh
 set -eu
 gh release list --repo Barbacoa08/scratchtree
-release_tag='v0.1.0-alpha.N' # Replace N with the approved unused number.
-case "$release_tag" in *N*) echo 'Choose a real release tag first.' >&2; exit 1 ;; esac
+release_tag='v0.2.0' # Use the explicitly approved, unused version.
+# Keep GitHub's prerelease flag while the application remains in alpha.
 
 git fetch origin --prune
 test -z "$(git status --porcelain)"
@@ -48,17 +48,25 @@ mkdir "$release_dir/staging" "$release_dir/assets"
 release_app="$release_dir/staging/Scratchtree.app"
 ditto "$release_target_dir/aarch64-apple-darwin/release/bundle/macos/Scratchtree.app" "$release_app"
 codesign --force --sign - --timestamp=none \
-  --identifier tech.barbajoe.scratchtree.preview "$release_app"
+  --identifier tech.barbajoe.scratchtree "$release_app"
 codesign --verify --deep --strict --verbose=2 "$release_app"
 codesign -dv --verbose=4 "$release_app" 2> "$release_dir/signature.txt"
 ln -s /Applications "$release_dir/staging/Applications"
 ```
 
-`--no-sign` builds without a signing identity; the subsequent `codesign --sign -` seals only the staged copy ad hoc. Do not change keychain, account, certificate, or notarization settings for this procedure. The checked-in `tauri:build` command makes an app bundle, not a DMG or a published release.
+`--no-sign` builds without a signing identity; the subsequent `codesign --sign -` seals only the staged copy ad hoc. Do not change keychain, account, certificate, or notarization settings for this procedure. The checked-in `tauri:build` command makes the release app bundle, not a DMG or a published release. Ordinary `tauri:dev` and `tauri:preview` commands use the checked-in Preview override; disposable probes still require their own explicitly authorized identity.
 
 Read `Contents/Info.plist` and confirm product name, bundle identifier, executable, and internal version against the selected source configuration. Run `lipo -archs` on that executable and require `arm64`. Record `vtool -show-build` output; do not claim an older macOS version is supported merely because the plist lists it. Record every staged bundle file's relative path and SHA-256, and inspect its complete contents, including symlinks, against the expected application resources. Never copy a running app's data directory into staging. The staging root must contain only the application and the `/Applications` symlink.
 
 Release tag and internal application version are different identities: alpha.1 and alpha.2 used internal version `0.1.0`. Read and disclose the actual values rather than silently changing source while packaging. A version/configuration change belongs in a reviewed source change before the release build.
+
+## Native Keychain access
+
+WebKit protects persisted WebCrypto keys with an application-bound Keychain master key. A separate database or webview store does not isolate that key from other executables using the same application identity. Keep disposable probes out of both the release identity and ordinary Preview identity (`tech.barbajoe.scratchtree.preview`); a different probe identity needs explicit authorization. Never delete a master key or reset Keychain to make a build appear to pass.
+
+Record the packaged build's designated requirement with `codesign -d -r-`. Ad-hoc builds can have different requirements after rebuilding, so a valid seal does not establish continued access to existing keys. Native OTP, key persistence, and relaunch checks remain separate release gates. Stable signing credentials and notarization still require their own authorization. [Apple code-signing guidance](https://developer.apple.com/library/archive/technotes/tn2206/) explains identity tracking.
+
+If macOS requests Keychain access, identify the exact requesting build and item before advising the user. **Allow** authorizes an access; **Always Allow** adds that app to the relevant operation's trusted list and persists beyond one sign-in. It does not authorize every app. Never request the user's password through chat or promise an exact prompt count. Stop if the same request repeats after a persistent grant, or the requester or item differs from the verified one; investigate without removing protection. See [Apple's access-control documentation](https://developer.apple.com/documentation/security/access-control-lists).
 
 ## Package and inspect the DMG
 
@@ -109,7 +117,7 @@ trap - EXIT HUP INT TERM
 
 ## Release notes, upload, and publication
 
-Write release notes inside the task folder. Include changes, exact source identity, actual verification/omissions, Apple Silicon/local-only limits, internal version, signing status, and installation instructions. Record the current schema-7/BackupV7 contract and the new application identity. Earlier alpha profiles and exports are not opened or migrated automatically. For an initial transfer, preserve an unchanged private export and recovery installer, convert a copy to the current contract, validate it, import it, and verify a fresh export/restore. Restore **replaces** the destination library; it does not merge libraries or synchronize Macs. Keep each machine's distinct export until the intended data is verified. Historical public alpha releases may be removed only under applicable task authorization and after a working recovery path exists.
+Write release notes inside the task folder. Include changes, exact source identity, actual verification/omissions, tested platform and account/synchronization limits, internal version, signing status, and installation instructions. Record the current BackupV8 contract and application identity. Earlier profiles and exports are not opened or migrated automatically. Before moving from the last pre-sync alpha.5, preserve an unchanged private BackupV7 and working recovery installer, use the separate local-only converter, validate its BackupV8 output, import it, and verify a fresh export. Keep each Mac’s distinct export until its intended data is verified. Do not bundle the converter, old reader, or actual exports in the product. Restore **replaces** the destination library and, while signed in, the shared library on every Mac. Drafts and Undo import only on that device; older offline work remains recoverable. Test native account/code persistence, offline reopen, sign-out/no-transport restart, two-client convergence, rejected-input recovery, and converted backup round trip before claiming those release features. Historical public alpha releases may be removed only under applicable task authorization and after a working recovery path exists.
 
 For an ad-hoc release, install the app in Applications, try opening it, click **Done** on the warning, then open **System Settings → Privacy & Security → Security** and click **Open Anyway**. Authenticate if prompted and confirm **Open**. Proceed only if you trust the download. Link [Apple's per-app opening instructions](https://support.apple.com/en-us/102445) and note that managed Macs may restrict opening. Do not prescribe disabling system-wide protections or removing quarantine attributes.
 

@@ -1,6 +1,6 @@
 # Open discussions
 
-These are product decisions for future discussion, not authorization to implement them. The accepted foundation remains local-first Markdown editing with visible syntax, SvelteKit, Svelte, CodeMirror, Tauri, and native SQLite. Current behavior and technical contracts live in [README.md](README.md) and [AGENTS.md](AGENTS.md). Technical defects and evidence limits should be tracked separately from these product choices.
+These are product decisions for future discussion, not authorization to implement them. The accepted foundation remains local-first Markdown editing with visible syntax, SvelteKit, Svelte, CodeMirror, Tauri, Dexie persistent IndexedDB, and Dexie Cloud. Current behavior and technical contracts live in [README.md](README.md) and [AGENTS.md](AGENTS.md). Technical defects and evidence limits should be tracked separately from these product choices.
 
 When a topic becomes actionable, link its individual GitHub issue here. Record a decision in the appropriate current guidance and mark the topic resolved instead of duplicating accepted policy indefinitely.
 
@@ -8,11 +8,11 @@ When a topic becomes actionable, link its individual GitHub issue here. Record a
 
 **Scratchtree** is the accepted name, with “Fast Markdown notes, organized into note trees” as its description. Use note, note tree / tree, parent, sibling, and child note. Root is the top navigation destination. Library refers to all stored data; use notes, Root, or editor in their specific contexts. The [branding record](docs/branding/README.md) preserves the terminology and selected icon family.
 
-The rename uses a new native identity and current-only storage/backup contracts. Alpha compatibility is not promised; actual notes still need a deliberate private backup and transfer. Historical alpha releases can be removed once the new package and private recovery path are verified. The application now offers System, Light, and Dark appearance, with a device-local preference separate from notes and backups. Platform icon containers and future icon/style refinements remain open, including alternate icon treatments for each appearance.
+Release builds use the permanent identity `tech.barbajoe.scratchtree`; ordinary Preview and explicitly authorized disposable identities stay separate. Current-only storage/backup contracts remain. Alpha compatibility is not promised; actual notes still need a deliberate private backup and transfer. Historical alpha releases can be removed once the new package and private recovery path are verified. The application now offers System, Light, and Dark appearance, with a device-local preference separate from notes and backups. Platform icon containers and future icon/style refinements remain open, including alternate icon treatments for each appearance.
 
 ## Styling experiment
 
-The current interface uses locally authored CSS; no styling library is selected. Compare it with an experiment using `@barbajoe/css-lib`, including interaction fidelity and maintenance costs, before deciding whether adoption helps.
+The desktop interface uses locally authored CSS; no desktop styling library is selected. The separate landing page uses `@barbajoe/css-lib`. Compare it with an experiment using `@barbajoe/css-lib`, including interaction fidelity and maintenance costs, before deciding whether adoption helps.
 
 ## Cross-parent movement
 
@@ -44,7 +44,17 @@ Manual Delete inside Trash permanently removes the selected item and its childre
 
 ## Accounts and synchronization
 
-A later MVP is intended to use one shared API/backend database and device-local copies, with local-first loading, initially for a single user's library across devices. Simple last-write-wins is acceptable. Authentication, backend technology, ordering, conflict handling, and recovery remain to be designed and evaluated; the current app is local-only.
+**Accepted:** Dexie Cloud, one personal library across Macs, local-first access, and existing-account email/code sign-in. The initial private alpha has no public sign-up; a server-side allowed-email check precedes OTP, and Dexie enforces account access. Sign-out retains local notes and stops transport. Submitted notes, tree structure/order, colors, completion, and Trash sync; drafts, Undo, editor history, preferences, and recovery stay on each Mac. Restore replaces the shared library, and older offline edits are recovered rather than automatically added back. Current-server synchronization is sufficient; version history remains deferred.
+
+Current source replaces native SQLite with persistent Dexie behind Repository and uses current-only BackupV8. Previous release backups use a separate local conversion/transfer procedure, not an app migration ladder. The published alpha.5 remains local-only until a separately authorized release. Source implementation, managed/browser proofs, packaged native acceptance, actual-note transfer, and publication are separate gates.
+
+Still to discuss: public registration/invitations and multi-user access, account management beyond this private alpha, historical/versioned backup, and any future sharing. Mobile sync follows the same library once phone scope and platform acceptance are decided. The right pane uses concise current-library status with expanded confirmation/recovery details; connectivity alone does not imply success.
+
+## Native sign-in and status wording
+
+Keep the normal sign-in flow to email and code. Explain any necessary macOS authorization for the app's protected device sign-in key before the system prompt, and use recognizable app naming. Preserve existing keys and their access controls; changing a confusing label must not reset authentication material. Current source explains the native Keychain request and retains one cache-opening attempt across permission-wait deadlines, so Retry can continue without restarting the app. A separately identified native first-run build completed user-verified email/code sign-in and same-build reopening without Keychain prompts. That result does not establish trust across rebuilt ad-hoc updates or repair the earlier Preview key. The accepted friendly system-item name is **Scratchtree sign-in key**. Its native implementation remains under investigation: changing the displayed name must preserve the existing key, trusted applications, allowed operations, and other access settings. The in-app explanation describes that item-scoped purpose without implying access to the entire Keychain. Stable signing and any separate test identity remain separately authorized decisions.
+
+The right panel uses **Status**, covering local saves and cloud synchronization without implying versioned backups. Its signed-out explanation identifies notes and drafts on this Mac; its signed-in explanation covers local saves and cloud sync. Keep the panel compact.
 
 ## Mobile companions
 

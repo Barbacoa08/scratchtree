@@ -1,5 +1,6 @@
+import { backupFixture } from '../fixtures/backup';
 import { it, expect } from 'vitest';
-import { validateBackup, encodeBackup } from '../../src/lib/domain/backup';
+import { validateBackup, encodeBackup } from '../fixtures/backup';
 import { item } from '../fixtures/items';
 import {
   composeKey,
@@ -41,8 +42,8 @@ const workspace = (): WorkspaceSnapshot => ({
 it('roundtrips nested ownership and resolves a flat hierarchy and exact compose keys', () => {
   const s = workspace();
   const checked = validateBackup(encodeBackup(s));
-  expect(checked).toHaveProperty('version', 7);
-  expect(checked).toHaveProperty('library', s);
+  expect(checked).toHaveProperty('version', 8);
+  expect(checked).toEqual(backupFixture(s));
   expect(
     treePath(
       s.items.filter((x) => x.kind === 'tree'),
@@ -75,7 +76,7 @@ it('validates a 10000 deep chain without recursion or quadratic ancestor scans',
       }),
     );
   }
-  expect(validateBackup(encodeBackup(s))).toHaveProperty('version', 7);
+  expect(validateBackup(encodeBackup(s))).toHaveProperty('version', 8);
   expect(
     treePath(
       s.items.filter((x) => x.kind === 'tree'),
@@ -119,7 +120,7 @@ it('accepts 200 Unicode code points and all 20001 legal draft contexts', () => {
   }
   s.drafts.push({ key: 'compose', markdown: '', revision: 0, updatedAt: 0 });
   expect(validateBackup(encodeBackup(s))).toHaveProperty(
-    'library.drafts.length',
+    'device.drafts.length',
     20001,
   );
 });

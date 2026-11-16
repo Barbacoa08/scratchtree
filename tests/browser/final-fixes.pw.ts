@@ -18,8 +18,8 @@ test('accepted maximum-safe timestamps remain accessible through restore and nor
   await expect(capture(page)).toBeVisible();
   await page.evaluate(() => {
     (window as any).__test.repo.restoreText = JSON.stringify({
-      format: 'scratchtree-alpha',
-      version: 7,
+      format: 'scratchtree',
+      version: 8,
       exportedAt: '2026-11-10T00:00:00.000Z',
       library: {
         items: [
@@ -38,9 +38,9 @@ test('accepted maximum-safe timestamps remain accessible through restore and nor
             deletedAt: null,
           },
         ],
-        drafts: [],
-        undoDeleteIds: [],
+        purgedIds: [],
       },
+      device: { drafts: [], undoDeleteIds: [], recovery: [] },
     });
   });
   await page
@@ -89,8 +89,26 @@ for (const constrained of [false, true])
   test(`selected actions preserve single-line and longer geometry; 150%=${constrained}`, async ({
     page,
     context,
+    browserName,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    if (browserName === 'chromium') {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    } else {
+      // This controls/geometry test uses a synthetic clipboard in other engines.
+      // Actual native clipboard behavior is a separate acceptance check.
+      await page.addInitScript(() => {
+        let text = '';
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: async (value: string) => {
+              text = value;
+            },
+            readText: async () => text,
+          },
+        });
+      });
+    }
     await page.setViewportSize(
       constrained ? { width: 800, height: 600 } : { width: 1145, height: 900 },
     );
@@ -133,7 +151,7 @@ for (const constrained of [false, true])
         'Copy Markdown',
         'Delete note',
       ]) {
-        await page.keyboard.press('Tab');
+        await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
         const action = card.getByRole('button', { name, exact: true });
         await expect(action).toBeFocused();
         expect(

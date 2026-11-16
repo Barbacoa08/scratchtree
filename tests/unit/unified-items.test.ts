@@ -1,7 +1,7 @@
 import { captureUndoDelete } from '../../src/lib/domain/items';
 import { describe, it, expect } from 'vitest';
 import { MemoryRepository } from '../fixtures/memory';
-import { validateBackup, encodeBackup } from '../../src/lib/domain/backup';
+import { validateBackup, encodeBackup } from '../fixtures/backup';
 const a = '00000000-0000-4000-8000-000000000001';
 const b = '00000000-0000-4000-8000-000000000002';
 const home = { scope: 'live' as const, itemId: null };
@@ -45,11 +45,11 @@ describe('unified source-bearing items', () => {
     expect(r.snapshot.items.find((x) => x.id === b)?.parentId).toBe(a);
     expect(r.snapshot.drafts[0].markdown).toBe('retained');
   });
-  it('exports strict version 7 and rejects duplicate sibling ranks', async () => {
+  it('exports strict version 8 and rejects duplicate sibling ranks', async () => {
     const r = new MemoryRepository();
     await r.createChildTree({ id: a, parent: home });
     await r.createChildTree({ id: b, parent: home });
-    expect(JSON.parse(encodeBackup(r.snapshot)).version).toBe(7);
+    expect(JSON.parse(encodeBackup(r.snapshot)).version).toBe(8);
     r.snapshot.items[1].position = 0;
     expect(validateBackup(encodeBackup(r.snapshot))).toHaveProperty('code');
   });
@@ -136,7 +136,7 @@ it('validates current graph, exact case references, metadata, duplicate position
     drafts: [],
     undoDeleteIds: [],
   };
-  expect(validateBackup(encodeBackup(valid))).toHaveProperty('version', 7);
+  expect(validateBackup(encodeBackup(valid))).toHaveProperty('version', 8);
   for (const mutate of [
     (s: any) => (s.items[0].parentId = b),
     (s: any) => (s.items[1].parentId = 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'),
@@ -208,7 +208,7 @@ it('bounds current source previews and handles a deep 20000-item tree without re
   ).toBeLessThanOrEqual(96);
   expect(
     validateBackup(encodeBackup({ items, drafts: [], undoDeleteIds: [] })),
-  ).toHaveProperty('version', 7);
+  ).toHaveProperty('version', 8);
 });
 it('keeps a failed capacity-limited atomic promotion/create unchanged, including drafts and metadata', async () => {
   const r = new MemoryRepository();
@@ -249,7 +249,7 @@ it('accepts the 20000-item and 40002 canonical draft ceilings when their complet
     .map((key) => ({ key, markdown: '', revision: 0, updatedAt: 0 }));
   const workspace = { items, drafts, undoDeleteIds: [] };
   expect(validateBackup(encodeBackup(workspace))).toHaveProperty(
-    'library.drafts.length',
+    'device.drafts.length',
     40002,
   );
   workspace.drafts.push({
@@ -382,8 +382,8 @@ it('capture whitespace agrees with native ECMAScript trimming and preserves nonb
   });
   expect(r.snapshot.items[0].markdown).toBe('\u0085');
 });
-it('accepts the shared synthetic version-7 library exactly', () => {
-  const text = readFileSync('tests/fixtures/valid-v7.json', 'utf8');
+it('accepts the shared synthetic version-8 library exactly', () => {
+  const text = readFileSync('tests/fixtures/valid-v8.json', 'utf8');
   expect(validateBackup(text)).toEqual(JSON.parse(text));
 });
 
@@ -507,7 +507,7 @@ it('recovers from definitively rejected complete-envelope capacity after reducin
       2048 -
       new TextEncoder().encode(encodeBackup(r.snapshot)).length,
   );
-  expect(validateBackup(encodeBackup(r.snapshot))).toHaveProperty('version', 7);
+  expect(validateBackup(encodeBackup(r.snapshot))).toHaveProperty('version', 8);
   const before = structuredClone(r.snapshot),
     c = new WorkspaceController(r);
   try {
