@@ -1,3 +1,4 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { test, expect, type Page } from '@playwright/test';
 const capture = (page: Page) =>
   page.getByRole('textbox', { name: 'New note Markdown' });
@@ -126,7 +127,7 @@ test('Command slash searches and Command 1 goes Root from an editor without losi
     .toBe('saved latest');
   await search(page).press('Escape');
   await stream(page).dispatchEvent('click');
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   await expect(capture(page)).toBeFocused();
   await capture(page).fill('tree draft');
   await capture(page).press('Meta+1');

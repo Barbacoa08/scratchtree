@@ -1,3 +1,4 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { test, expect, type Page } from '@playwright/test';
 const card = (page: Page) => page.getByRole('article', { name: 'Saved note' });
 const stream = (page: Page) =>
@@ -65,7 +66,7 @@ test('X leaves typing, IME, DOM ranges, and modifiers alone, and toggles selecte
   await page.getByRole('searchbox').fill('x');
   await expect(page.getByRole('searchbox')).toHaveValue('x');
   await page.getByRole('searchbox').press('Escape');
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   // A saved child keeps this destination a tree when it is exited.
   await capture(page, 'container child');
   await page.getByRole('button', { name: 'Root', exact: true }).click();

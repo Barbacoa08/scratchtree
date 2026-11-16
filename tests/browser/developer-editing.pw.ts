@@ -1,3 +1,4 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { test, expect, type Page } from '@playwright/test';
 const capture = (p: Page) =>
   p.getByRole('textbox', { name: 'New note Markdown' });
@@ -87,7 +88,7 @@ for (const mode of ['capture', 'inline'] as const) {
     ).toBe('```js\nconst x = 1;\n```\n');
   });
 }
-test('capture Up at zero selects last visible note, skips child tree, and retains draft history and Escape selection', async ({
+test('capture Up at zero restores highlighted note and retains draft history and Escape selection', async ({
   page,
 }) => {
   await seed(page, ['first', 'last']);
@@ -114,7 +115,7 @@ test('capture Up at zero selects last visible note, skips child tree, and retain
   await capture(page).press('ArrowUp');
   await expect(stream(page)).toBeFocused();
   await expect(
-    page.getByRole('article', { name: 'Saved note' }).last(),
+    page.getByRole('article', { name: 'Saved note' }).first(),
   ).toHaveClass(/selected/);
   await page.keyboard.press('Space');
   await expect(capture(page)).toHaveText('draft');
@@ -143,7 +144,7 @@ test('capture Up at zero selects last visible note, skips child tree, and retain
   await expect(stream(page)).toBeFocused();
   await expect(page.getByRole('searchbox')).toHaveValue('no result');
   await page.getByRole('button', { name: 'Root', exact: true }).click();
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   await capture(page).fill('child draft');
   await page.getByRole('button', { name: 'Root', exact: true }).click();
   await page.keyboard.press('Space');
@@ -157,7 +158,7 @@ for (const key of ['ArrowUp', 'ArrowLeft']) {
     page,
   }) => {
     await seed(page, []);
-    await page.keyboard.press('Meta+n');
+    await createTreeFixture(page);
     const owner = await page.evaluate(
       () => (window as any).__test.controller.state.ownerId,
     );
@@ -334,10 +335,10 @@ for (const large of [false, true])
     });
     await inline(page).press('Escape');
     const last = page.getByRole('article', { name: 'Saved note' }).last();
-    await expect(last.locator('.note-body')).toHaveCSS(
-      'max-height',
-      `${cap}px`,
-    );
+    await expect(last.locator('.note-body')).toHaveClass(/preview-collapsed/);
+    expect(
+      (await last.locator('.note-body').boundingBox())!.height,
+    ).toBeLessThan(cap / 5);
     const expand = last.getByRole('button', {
       name: 'Expand note',
       exact: true,
@@ -412,12 +413,16 @@ test('unchanged edit baseline follows a constrained resize and late text scaling
         (await notes.first().locator('.note-body').boundingBox())!.height,
     )
     .toBe((await notes.last().locator('.note-body').boundingBox())!.height);
+  await expect(notes.first().locator('.note-body')).toHaveCSS(
+    'overflow-y',
+    'hidden',
+  );
   expect(
     await notes
       .first()
-      .locator('.note-body')
+      .locator('.cm-scroller')
       .evaluate((e) => e.scrollHeight > e.clientHeight),
-  ).toBe(false);
+  ).toBe(true);
   await inline(page).press('Escape');
   await expect(inline(page)).toHaveCount(0);
 });

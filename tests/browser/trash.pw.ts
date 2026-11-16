@@ -299,13 +299,12 @@ test('Trash Command-N uses selected note parent, promotes atomically, and Back r
   await expect(capture(page)).toBeFocused();
   const s = await page.evaluate(() => (window as any).__test.repo.snapshot);
   expect(s.items.find((x: any) => x.id === ids[4]).kind).toBe('tree');
-  expect(s.items.filter((x: any) => x.parentId === ids[4])).toHaveLength(1);
+  expect(s.items.filter((x: any) => x.parentId === ids[4])).toHaveLength(0);
+  await capture(page).fill('saved Trash child');
+  await capture(page).press('Enter');
   await capture(page).press('Escape');
   await stream(page).press('ArrowLeft');
-  await expect(
-    card(page, s.items.find((x: any) => x.parentId === ids[4]).id),
-  ).toHaveClass(/selected/);
-  await stream(page).press('ArrowLeft');
+  await expect(card(page, ids[4])).toHaveClass(/selected/);
   await expect(page.locator('h1')).toHaveText('Trash / parent **source**');
   await expect(card(page, ids[4])).toHaveClass(/selected/);
   await stream(page).press('ArrowLeft');

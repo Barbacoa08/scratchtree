@@ -1,12 +1,36 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { renderMarkdown, externalUrl } from '../domain/markdown';
+  import { copyMarkdown } from '../platform/actions';
+  import { renderMarkdownBlocks, externalUrl } from '../domain/markdown';
   let { source, onopen }: { source: string; onopen: (url: string) => void } =
     $props();
+  let copyStatus = $state('');
   let host: HTMLDivElement;
-  const html = $derived(renderMarkdown(source));
+  const rendered = $derived(renderMarkdownBlocks(source));
   onMount(() => {
     function activate(event: MouseEvent) {
+      const button = (event.target as Element).closest<HTMLButtonElement>(
+        '.code-copy',
+      );
+      if (button) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.type === 'click') {
+          const code =
+            rendered.code[Number(button.getAttribute('data-code-index'))];
+          if (code === undefined) return;
+          void copyMarkdown(code).then(
+            () => {
+              copyStatus = 'Code copied';
+            },
+            () => {
+              copyStatus =
+                'Copy failed. Your code is unchanged; retry Copy code.';
+            },
+          );
+        }
+        return;
+      }
       const anchor = (event.target as Element).closest('a');
       if (!anchor) return;
       event.preventDefault();
@@ -23,4 +47,6 @@
   });
 </script>
 
-<div class="markdown-view" bind:this={host}>{@html html}</div>
+<div class="markdown-view" bind:this={host}>{@html rendered.html}</div>
+
+<p class="code-copy-feedback" aria-live="polite">{copyStatus}</p>

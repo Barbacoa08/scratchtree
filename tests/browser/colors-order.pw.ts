@@ -602,7 +602,9 @@ test('held Command hides unavailable stream actions with no selected entry', asy
   await seed(page);
   await stream(page).focus();
   await page.keyboard.down('Meta');
-  await expect(page.locator('.stream-command-hint')).toHaveText('⌘N New tree');
+  await expect(page.locator('.stream-command-hint')).toHaveText(
+    '⌘N Write a note',
+  );
   await expect(page.locator('.home-command-hint')).toBeVisible();
   await page.keyboard.up('Meta');
   await expect(page.locator('.command-hint')).toHaveCount(0);
@@ -619,19 +621,19 @@ test('held Command updates stream hints on editor, Search, control, selection, a
   await expect(editor).toBeFocused();
   await page.keyboard.down('Meta');
   const hints = page.locator('.stream-command-hint');
-  await expect(hints).toHaveText('⌘N New tree');
+  await expect(hints).toHaveText('⌘N Write a note');
   await page.getByRole('searchbox').focus();
-  await expect(hints).toHaveText('⌘N New tree');
+  await expect(hints).toHaveText('⌘N Write a note');
   await stream(page).focus();
-  await expect(hints).toHaveText('⌘N New tree · ⌘↑/↓ Reorder · ⌘⌫ Delete');
+  await expect(hints).toHaveText('⌘N Write a note · ⌘↑/↓ Reorder · ⌘⌫ Delete');
   await page
     .getByRole('button', { name: 'Export backup', exact: true })
     .focus();
-  await expect(hints).toHaveText('⌘N New tree');
+  await expect(hints).toHaveText('⌘N Write a note');
   await card(page, ids[0])
     .getByRole('button', { name: 'Reorder note', exact: true })
     .focus();
-  await expect(hints).toHaveText('⌘N New tree · ⌘↓ Reorder');
+  await expect(hints).toHaveText('⌘N Write a note · ⌘↓ Reorder');
   await stream(page).focus();
   await expect(hints).toContainText('Delete');
   await card(page, ids[1])
@@ -642,7 +644,7 @@ test('held Command updates stream hints on editor, Search, control, selection, a
       window.getSelection()?.removeAllRanges();
       window.getSelection()?.addRange(range);
     });
-  await expect(hints).toHaveText('⌘N New tree');
+  await expect(hints).toHaveText('⌘N Write a note');
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
   await expect(hints).toContainText('Reorder');
   await page.keyboard.up('Meta');
@@ -657,13 +659,15 @@ test('held Command advertises only possible sibling directions, no singleton or 
   for (const [index, keys] of ['⌘↓', '⌘↑/↓', '⌘↑'].entries()) {
     await card(page, ids[index]).click();
     await page.keyboard.down('Meta');
-    await expect(hints).toHaveText(`⌘N New tree · ${keys} Reorder · ⌘⌫ Delete`);
+    await expect(hints).toHaveText(
+      `⌘N Write a note · ${keys} Reorder · ⌘⌫ Delete`,
+    );
     await page.keyboard.up('Meta');
   }
   await page.getByRole('searchbox').fill('source');
   await card(page, ids[0]).click();
   await page.keyboard.down('Meta');
-  await expect(hints).toHaveText('⌘N New tree · ⌘⌫ Delete');
+  await expect(hints).toHaveText('⌘N Write a note · ⌘⌫ Delete');
   await page.keyboard.up('Meta');
   await page.getByRole('button', { name: 'Root', exact: true }).click();
   await card(page, ids[2]).click();
@@ -672,7 +676,7 @@ test('held Command advertises only possible sibling directions, no singleton or 
   await capture(page).press('Enter');
   await stream(page).focus();
   await page.keyboard.down('Meta');
-  await expect(hints).toHaveText('⌘N New tree · ⌘⌫ Delete');
+  await expect(hints).toHaveText('⌘N Write a note · ⌘⌫ Delete');
   await page.keyboard.up('Meta');
 });
 
@@ -708,7 +712,7 @@ for (const scale of [100, 150])
     });
     await page.getByRole('searchbox').focus();
     await expect(page.locator('.stream-command-hint')).toHaveText(
-      '⌘N New tree',
+      '⌘N Write a note',
     );
     expect(await geometry()).toEqual(before);
     await page.screenshot({

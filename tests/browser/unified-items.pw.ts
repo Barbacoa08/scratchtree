@@ -23,7 +23,7 @@ async function seed(p: Page, sources: string[]) {
     return ids;
   }, sources);
 }
-test('selected note Command-N atomically preserves latest source and opens one child; tree Command-N adds to same selected parent', async ({
+test('selected note Command-N preserves latest source and enters that exact parent; tree Command-N composes there', async ({
   page,
 }) => {
   const [id] = await seed(page, ['**parent**\r\n']);
@@ -36,20 +36,21 @@ test('selected note Command-N atomically preserves latest source and opens one c
   let items = await page.evaluate(
     () => (window as any).__test.repo.snapshot.items,
   );
-  expect(items).toHaveLength(2);
+  expect(items).toHaveLength(1);
   expect(items.find((x: any) => x.id === id)).toMatchObject({
     kind: 'tree',
     markdown: 'latest **source**\r\n',
     parentId: null,
     position: 0,
   });
-  expect(items.find((x: any) => x.id !== id).parentId).toBe(id);
+  await capture(page).fill('saved child');
+  await capture(page).press('Enter');
   await page.keyboard.press('Meta+1');
   await parent.click();
   await page.keyboard.press('Meta+n');
   await expect(capture(page)).toBeFocused();
   items = await page.evaluate(() => (window as any).__test.repo.snapshot.items);
-  expect(items.filter((x: any) => x.parentId === id)).toHaveLength(2);
+  expect(items.filter((x: any) => x.parentId === id)).toHaveLength(1);
 });
 test('Right promotes unchanged ID, empty destinations focus capture, and tree double-click edits with E at end and retained Undo', async ({
   page,
@@ -125,7 +126,7 @@ test('blank stream background clears selection after flush; Command-N then uses 
     kind: 'note',
     markdown: 'latest source',
   });
-  expect(items.find((x: any) => x.id !== id).parentId).toBeNull();
+  expect(items).toHaveLength(1);
 });
 
 test('failed Delete has its own retry and keeps same ordinal focus without submitting capture', async ({
@@ -165,9 +166,10 @@ test('selected global result becomes Command-N parent instead of the current ope
   await expect(capture(page)).toBeFocused();
   const s = await page.evaluate(() => (window as any).__test.repo.snapshot);
   expect(s.items.find((x: any) => x.id === ids[1]).kind).toBe('tree');
-  expect(s.items.find((x: any) => x.markdown === 'Untitled').parentId).toBe(
-    ids[1],
-  );
+  expect(s.items).toHaveLength(2);
+  expect(
+    await page.evaluate(() => (window as any).__test.controller.state.ownerId),
+  ).toBe(ids[1]);
   expect(await page.getByRole('searchbox').inputValue()).toBe('');
 });
 test('deleting the open container through global search returns Root and retains its scoped draft for Undo', async ({
@@ -215,7 +217,7 @@ test('blank-background source flush preserves newer Search focus and query', asy
     ),
   ).toBe('latest');
 });
-test('Capture Up follows displayed sibling rank, skips interleaved trees, and uses displayed search order', async ({
+test('Capture Up falls back to displayed note rank and preserves a valid highlight in search', async ({
   page,
 }) => {
   const ids = await seed(page, ['match first-created', 'match second-created']);
@@ -265,7 +267,7 @@ test('Capture Up follows displayed sibling rank, skips interleaved trees, and us
   await capture(page).focus();
   await capture(page).press('Meta+Home');
   await capture(page).press('ArrowUp');
-  await expect(page.locator(`[data-entry-id="${ids[1]}"]`)).toHaveClass(
+  await expect(page.locator(`[data-entry-id="${ids[0]}"]`)).toHaveClass(
     /selected/,
   );
   await expect(stream(page)).toBeFocused();

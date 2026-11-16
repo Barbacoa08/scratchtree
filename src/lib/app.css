@@ -443,16 +443,19 @@ kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .code-block {
+  position: relative;
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--border);
   background: var(--code-block);
   padding: 0.5rem;
+  padding-inline-end: 4rem;
   counter-reset: code-line;
 }
 .code-block code {
   display: block;
+  overflow-x: auto;
   white-space: pre;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -1593,4 +1596,58 @@ main:has(.workspace) .sidebar {
 }
 html[data-theme='light'] .note-card.done .markdown-view {
   opacity: 1;
+}
+
+.cm-strikethrough {
+  text-decoration: line-through;
+}
+.note-body.preview-collapsed {
+  max-height: var(--preview-line);
+  min-height: 0;
+  overflow: hidden;
+}
+.code-copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  display: block;
+  margin: 0 0 0.4rem auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--control);
+  color: var(--text);
+  padding: 0.15rem 0.4rem;
+  font: inherit;
+  font-size: 0.75rem;
+}
+.tree-command-hint {
+  right: 0.3rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.color-tooltip {
+  position: fixed;
+  z-index: 16;
+  pointer-events: none;
+  background: var(--popup-background);
+  color: var(--popup-text);
+  border: 1px solid var(--popup-border);
+  border-radius: 4px;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  box-shadow: 0 0.2rem 0.6rem var(--overlay-shadow);
+}
+
+.code-copy-feedback {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.code-copy-feedback:empty {
+  display: none;
+}
+
+.note-body.preview-collapsed .note-rendered {
+  transform: translateY(calc(-1 * var(--preview-offset)));
 }

@@ -1,9 +1,10 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { test, expect, type Page } from '@playwright/test';
 const capture = (page: Page) =>
   page.getByRole('textbox', { name: 'New note Markdown' });
 async function create(page: Page, name: string) {
   await expect(capture(page)).toBeVisible();
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   await expect(capture(page)).toBeFocused();
   await expect(page.getByRole('dialog', { name: 'New tree' })).toHaveCount(0);
   // Named fixtures edit the source-bearing container through the current boundary.
@@ -14,7 +15,7 @@ async function create(page: Page, name: string) {
     await c.flush();
   }, name);
 }
-test('Command N preserves editor draft, creates nested trees, captures there, and global search identifies ownership', async ({
+test('nested tree navigation preserves editor draft, captures there, and global search identifies ownership', async ({
   page,
 }) => {
   await page.goto('/?fixture');
@@ -257,7 +258,7 @@ test('constrained sidebar keeps actual nested navigation visible and tree creati
       return button.top >= nav.top && button.bottom <= nav.bottom;
     }),
   ).toBe(true);
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   await expect(page.getByRole('dialog', { name: 'New tree' })).toHaveCount(0);
   await expect(capture(page)).toBeFocused();
 });

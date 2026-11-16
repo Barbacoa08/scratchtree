@@ -63,7 +63,9 @@ test('M stages destinations without writing, traps focus, and cancels from Escap
   const dialog = page.getByRole('dialog', { name: 'Move notes' });
   await expect(dialog).toBeVisible();
   const list = dialog.getByRole('listbox', { name: 'Destination' });
-  await expect(list).toBeFocused();
+  await expect(
+    dialog.getByRole('searchbox', { name: 'Search destinations' }),
+  ).toBeFocused();
   await dialog
     .getByRole('option', { name: 'destination alpha, Root', exact: true })
     .click();
@@ -79,7 +81,9 @@ test('M stages destinations without writing, traps focus, and cancels from Escap
     dialog.getByRole('button', { name: 'Move', exact: true }),
   ).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(list).toBeFocused();
+  await expect(
+    dialog.getByRole('searchbox', { name: 'Search destinations' }),
+  ).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await expect(
     dialog.getByRole('button', { name: 'Move', exact: true }),

@@ -1,8 +1,9 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { test, expect, type Page } from '@playwright/test';
 const capture = (p: Page) =>
   p.getByRole('textbox', { name: 'New note Markdown' });
 async function child(p: Page, label: string) {
-  await p.keyboard.press('Meta+n');
+  await createTreeFixture(p);
   await expect(capture(p)).toBeFocused();
   return p.evaluate(async (label) => {
     const c = (window as any).__test.controller;

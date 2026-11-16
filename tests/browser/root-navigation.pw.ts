@@ -1,3 +1,4 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { test, expect } from '@playwright/test';
 
 for (const large of [false, true]) {
@@ -40,7 +41,7 @@ for (const large of [false, true]) {
     await root.focus();
     await page.keyboard.press('Tab');
     await expect(separator).not.toBeFocused();
-    await page.keyboard.press('Meta+n');
+    await createTreeFixture(page);
     await expect(root).toBeVisible();
     await expect(root).not.toHaveAttribute('aria-current');
     await expect(separator).toBeVisible();
@@ -68,7 +69,7 @@ test('Root separator stays above child rows without intercepting keyboard naviga
 }) => {
   await page.goto('/?fixture');
   await page.getByRole('textbox', { name: 'New note Markdown' }).waitFor();
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   await page.evaluate(async () => {
     const t = (window as any).__test;
     const id = t.controller.state.ownerId;
@@ -124,6 +125,7 @@ test('M presents Root paths while physical Home and End still stage destinations
   await expect(dialog).toContainText('Trash when their parent moves to Root.');
   const root = dialog.getByRole('option', { name: 'Root', exact: true });
   const trash = dialog.getByRole('option', { name: 'Trash', exact: true });
+  await page.keyboard.press('Tab');
   await page.keyboard.press('End');
   await expect(trash).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Home');

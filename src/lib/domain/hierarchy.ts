@@ -137,7 +137,11 @@ function visibleRows(
     rows: TreeRow[] = [];
   while (pending.length) {
     const row = pending.pop()!;
-    rows.push({ ...row, hasChildren: children.has(row.tree.id) });
+    if (row.tree.done) continue;
+    rows.push({
+      ...row,
+      hasChildren: (children.get(row.tree.id) ?? []).some((tree) => !tree.done),
+    });
     if (expanded.has(row.tree.id))
       for (const tree of [...(children.get(row.tree.id) ?? [])].reverse())
         pending.push({ tree, depth: row.depth + 1 });

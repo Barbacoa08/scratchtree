@@ -1,3 +1,4 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { expect, test } from '@playwright/test';
 
 for (const large of [false, true]) {
@@ -75,7 +76,7 @@ for (const large of [false, true]) {
       sidebar.getByRole('button', { name: 'New note', exact: true }),
     ).toHaveCount(0);
     await expect(page.getByLabel('Keyboard shortcuts')).toContainText(
-      'New tree',
+      'Write a note',
     );
     await expect(page.getByLabel('Keyboard shortcuts')).toContainText('Space');
   });
@@ -94,8 +95,8 @@ for (const large of [false, true]) {
       await page.addStyleTag({
         content: ':root { font-size: 24px !important }',
       });
-    await page.keyboard.press('Meta+n');
-    await page.keyboard.press('Meta+n');
+    await createTreeFixture(page);
+    await createTreeFixture(page);
     const row = page
       .locator('.tree-row')
       .filter({ has: page.getByRole('button', { name: /Collapse tree/ }) })
@@ -176,7 +177,7 @@ for (const large of [false, true]) {
       await page.addStyleTag({
         content: ':root { font-size: 24px !important }',
       });
-    for (let i = 0; i < 5; i++) await page.keyboard.press('Meta+n');
+    for (let i = 0; i < 5; i++) await createTreeFixture(page);
     const row = page
       .locator('.tree-row')
       .filter({ has: page.locator('.tree-level', { hasText: 'Level 4' }) });
@@ -203,7 +204,7 @@ for (const large of [false, true]) {
   });
 }
 
-test('tree creation and note capture have distinct shortcuts and preserve the draft', async ({
+test('Command-N and Space both focus capture without losing its draft', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1400, height: 800 });
@@ -221,23 +222,25 @@ test('tree creation and note capture have distinct shortcuts and preserve the dr
   await expect(page.getByRole('article')).toHaveCount(0);
   const shortcuts = page.getByLabel('Keyboard shortcuts');
   await expect(
-    shortcuts.locator('div').filter({ hasText: 'New tree' }),
+    shortcuts.locator('div').filter({ hasText: 'Write a note in selection' }),
   ).toContainText('N');
   await expect(
-    shortcuts.locator('div').filter({ hasText: 'Write a note' }),
+    shortcuts
+      .locator('div')
+      .filter({ has: page.getByText('Write a note', { exact: true }) }),
   ).toContainText('Space');
   await page.getByRole('region', { name: 'Note stream', exact: true }).focus();
   await page.keyboard.press('Space');
   await expect(capture).toBeFocused();
   await expect(capture).toHaveText('unfinished **draft');
   await page.keyboard.press('Meta+n');
-  await expect(
-    page.getByRole('button', { name: 'Open tree Untitled', exact: true }),
-  ).toBeVisible();
+  await expect(capture).toBeFocused();
+  await expect(capture).toHaveText('unfinished **draft');
+  await expect(page.getByRole('article')).toHaveCount(0);
   await expect(
     page.getByRole('searchbox', { name: 'Search saved notes' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Root', exact: true }).click();
   await expect(capture).toHaveText('unfinished **draft');
-  await expect(editor.locator('.stream-header')).toContainText('1 note');
+  await expect(editor.locator('.stream-header')).toContainText('0 notes');
 });

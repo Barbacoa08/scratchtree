@@ -48,7 +48,7 @@ for (const theme of ['light', 'dark']) {
     const move = page.getByRole('dialog', { name: 'Move notes' });
     await expectSurface(move, theme);
     await expect(
-      move.getByRole('listbox', { name: 'Destination' }),
+      move.getByRole('searchbox', { name: 'Search destinations' }),
     ).toBeFocused();
     const dialogBox = (await move.boundingBox())!;
     expect(dialogBox.x).toBeGreaterThanOrEqual(0);

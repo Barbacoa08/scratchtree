@@ -24,11 +24,11 @@ Mouse Shift-range and Command-toggle selection are accepted. Research keyboard r
 
 ## Tabs
 
-Root and Search have keyboard navigation hints; tabs and Command-number switching beyond Root are deferred. Decide whether tabs improve navigation and how their state and shortcuts should work.
+Root, Search, and the first eight visible direct-child trees have keyboard navigation hints. Command-1 opens Root, and Command-2–9 opens those trees in sidebar order. Tabs remain deferred; decide whether they improve navigation and what their state should be.
 
 ## Pinning
 
-The sidebar currently shows every live container, and no pin control is offered. Decide whether pinning has a useful purpose and, if so, its behavior and presentation.
+The sidebar shows live trees except completed trees and their descendants, and no pin control is offered. Decide whether pinning has a useful purpose and, if so, its behavior and presentation.
 
 ## Dedicated to-dos
 

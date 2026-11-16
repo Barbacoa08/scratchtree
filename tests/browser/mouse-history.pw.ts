@@ -1,10 +1,11 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { test, expect, type Page, type Locator } from '@playwright/test';
 const capture = (p: Page) =>
   p.getByRole('textbox', { name: 'New note Markdown' });
 const at = (p: Page) =>
   p.evaluate(() => (window as any).__test.controller.state.location);
 async function child(p: Page) {
-  await p.keyboard.press('Meta+n');
+  await createTreeFixture(p);
   await expect(capture(p)).toBeFocused();
   return (await at(p)).itemId as string;
 }

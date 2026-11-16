@@ -153,6 +153,16 @@
   }
   let interaction = 0;
   let creating = false;
+  let captureRetry: {
+    identity: object;
+    epoch: number;
+    interaction: number;
+  } | null = null;
+  function retainCaptureRetry(request: number) {
+    const identity = controller.commandRetryIdentity;
+    if (identity)
+      captureRetry = { identity, epoch: workspaceEpoch, interaction: request };
+  }
   let composer = $state<MarkdownEditor>();
   let noteBodies = $state<Record<string, ItemCard | undefined>>({});
   let captureFenced = $state(false);
@@ -305,7 +315,7 @@
     commandHeld && viewState.loaded && !blocked && !palette,
   );
   let streamCommandHint = $derived.by(() => {
-    const hints = ['⌘N New tree'];
+    const hints = ['⌘N Write a note'];
     const selectedVisible = shownEntries.some((x) => x.id === selected);
     const typing = isTyping(hintFocus);
     // Handles have their own Command-arrow binding; other controls use the
@@ -397,24 +407,22 @@
       focus.stop();
     }
   }
-  async function createTree() {
+  async function writeNote() {
     if (blocked || creating) return;
+    const target = shownEntries.find((entry) => entry.id === selected);
+    if (!target) return compose();
     navigation.cancel();
     creating = true;
     const request = ++interaction,
       focus = observeSubmissionFocus();
     selection.remember(viewState.location, selected);
     try {
-      if (
-        await controller.createTree(
-          shownEntries.some((x) => x.id === selected) ? selected : undefined,
-        )
-      ) {
+      if (await controller.enterItem(target.id)) {
         if (request !== interaction) return;
         setSelected('');
         await tick();
         if (focus.mayRestore()) composer?.focus();
-      }
+      } else retainCaptureRetry(request);
     } finally {
       creating = false;
       focus.stop();
@@ -623,7 +631,7 @@
       if (await controller.newNote()) {
         await tick();
         if (request === interaction && focus.mayRestore()) composer?.focus();
-      }
+      } else retainCaptureRetry(request);
     } finally {
       focus.stop();
     }
@@ -869,6 +877,12 @@
           ? undoRetry
           : null;
       const ownsUndoSelection = undo?.interaction === request - 1;
+      const capture =
+        captureRetry?.identity === controller.mutationRetryIdentity &&
+        captureRetry.epoch === workspaceEpoch
+          ? captureRetry
+          : null;
+      const ownsCapture = capture?.interaction === request - 1;
       if (undo) undoPending = undoing = true;
       const retry =
         paletteRetry?.identity === controller.mutationRetryIdentity &&
@@ -880,6 +894,15 @@
         palette.error = '';
       }
       const ok = await controller.retryMutation();
+      if (capture) {
+        if (ok) captureRetry = null;
+        else if (controller.commandRetryIdentity)
+          captureRetry = {
+            ...capture,
+            identity: controller.commandRetryIdentity,
+            interaction: ownsCapture ? request : capture.interaction,
+          };
+      }
       if (undo) {
         if (ok) undoRetry = null;
         else if (controller.commandRetryIdentity)
@@ -913,7 +936,8 @@
       const restored = ownsUndoSelection
         ? undo?.ids.find((id) => entries.some((entry) => entry.id === id))
         : undefined;
-      if (restored) setSelected(restored);
+      if (ownsCapture) setSelected('');
+      else if (restored) setSelected(restored);
       else if (before !== JSON.stringify(controller.state.location))
         setSelected(
           selection.open(
@@ -1398,7 +1422,9 @@
   }
   function capturePrevious() {
     if (blocked) return false;
-    const note = shownEntries.filter((x) => x.kind === 'note').at(-1);
+    const note =
+      shownEntries.find((entry) => entry.id === selected) ??
+      shownEntries.filter((x) => x.kind === 'note').at(-1);
     if (!note) return captureEmptyStream();
     ++interaction;
     setSelected(note.id);
@@ -1419,7 +1445,7 @@
       event.defaultPrevented ||
       event.isComposing ||
       !viewState.loaded ||
-      (blocked && !(event.key === '1' && !navigationBlocked)) ||
+      (blocked && !(/^[1-9]$/.test(event.key) && !navigationBlocked)) ||
       palette ||
       !event.metaKey ||
       event.altKey ||
@@ -1432,10 +1458,14 @@
       event.stopPropagation();
       search?.focus();
       void controller.flush();
-    } else if (event.key === '1') {
+    } else if (/^[1-9]$/.test(event.key)) {
       event.preventDefault();
       event.stopPropagation();
-      void openTree(null);
+      if (event.key === '1') void openTree(null);
+      else {
+        const tree = hierarchy.rows(new Set()).at(Number(event.key) - 2)?.tree;
+        if (tree) void openTree(tree.id);
+      }
     }
   }
   function commands(event: KeyboardEvent) {
@@ -1463,7 +1493,7 @@
         moveKey(event, selected);
       } else if (key === 'n') {
         event.preventDefault();
-        void createTree();
+        void writeNote();
       } else if (key === 'f') {
         event.preventDefault();
         search?.focus();
@@ -1756,6 +1786,7 @@
         <div class="navigation-hint-anchor">
           <TreeSidebar
             presentation={hierarchy}
+            {showCommandHints}
             currentId={viewState.ownerId}
             live={viewState.location.scope === 'live'}
             disabled={navigationBlocked}
@@ -2013,7 +2044,7 @@
           {/if}
           <div class="shortcut-list" aria-label="Keyboard shortcuts">
             <div>
-              <span>New tree</span><span class="shortcut-keys"
+              <span>Write a note in selection</span><span class="shortcut-keys"
                 ><kbd>⌘</kbd><kbd>N</kbd></span
               >
             </div>

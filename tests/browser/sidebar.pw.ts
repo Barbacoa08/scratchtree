@@ -22,7 +22,9 @@ test('search leads navigation and status remains accessible in details', async (
   await expect(
     page.getByRole('region', { name: 'Editor status' }),
   ).toBeVisible();
-  await expect(page.getByLabel('Keyboard shortcuts')).toContainText('New tree');
+  await expect(page.getByLabel('Keyboard shortcuts')).toContainText(
+    'Write a note',
+  );
   await expect(page.getByLabel('Keyboard shortcuts')).toContainText('Space');
 });
 

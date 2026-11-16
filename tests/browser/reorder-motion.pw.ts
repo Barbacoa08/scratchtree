@@ -410,6 +410,8 @@ test('existing nearest-item visibility scroll skips cosmetic motion and keeps fi
     '\n\n',
   );
   const ids = await seed(page, ['moving', long, long]);
+  await card(page, ids[1]).getByRole('button', { name: 'Expand note' }).click();
+  await card(page, ids[2]).getByRole('button', { name: 'Expand note' }).click();
   await page.setViewportSize({ width: 1400, height: 600 });
   await handle(page, ids[0]).press('Meta+ArrowDown');
   await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
