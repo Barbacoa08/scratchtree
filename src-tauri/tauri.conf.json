@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Scratchtree",
-  "version": "0.1.0",
-  "identifier": "tech.barbajoe.scratchtree.preview",
+  "version": "0.2.0",
+  "identifier": "tech.barbajoe.scratchtree",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://127.0.0.1:4511",

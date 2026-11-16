@@ -1,3 +1,4 @@
+import { version as appVersion } from '../../package.json';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 let stored: string | null;
@@ -47,7 +48,7 @@ it('retains useful allowlisted locations while excluding source-bearing messages
     500,
   );
   expect(record).toMatchObject({
-    version: '0.1.0',
+    version: appVersion,
     name: 'TypeError',
     status: 500,
     locations: [

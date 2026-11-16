@@ -1,6 +1,6 @@
 {
   "name": "scratchtree",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.4.1",
@@ -12,9 +12,10 @@
     "test:browser": "playwright test",
     "build:web": "vite build",
     "build:site": "node website/build.mjs",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "tauri dev --config src-tauri/tauri.preview.conf.json",
     "tauri:build": "tauri build --bundles app --target aarch64-apple-darwin",
-    "verify": "pnpm check && pnpm test:unit && pnpm test:browser && pnpm build:web && pnpm build:site && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml"
+    "verify": "pnpm check && pnpm test:unit && pnpm test:browser && pnpm build:web && pnpm build:site && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
+    "tauri:preview": "tauri build --bundles app --target aarch64-apple-darwin --config src-tauri/tauri.preview.conf.json"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",

@@ -18,7 +18,7 @@ Update dependencies deliberately, assess the impact, and retain the applicable l
 
 ## Native authentication and Keychain evidence
 
-For macOS WebCrypto tests, record the exact application path, bundle identifier, and designated code-signing requirement. Database names and webview data directories do not isolate the application's Keychain master key. Disposable probes must not reuse the current Preview identity; obtain authorization for a separate test identity first. Do not repair a test by deleting keys or weakening their access controls.
+For macOS WebCrypto tests, record the exact application path, bundle identifier, and designated code-signing requirement. Database names and webview data directories do not isolate the application's Keychain master key. Release builds use `tech.barbajoe.scratchtree`, and ordinary Preview builds use `tech.barbajoe.scratchtree.preview`. Disposable probes must not reuse either identity; obtain authorization for a separate test identity first. Do not repair a test by deleting keys or weakening their access controls.
 
 An ad-hoc signature can pass integrity verification while a rebuilt app still needs authorization to use a previously created key. Verify real sign-in and a relaunch of the same packaged build; a probe's persistent CryptoKey result does not establish trust across different builds. See the [release guide](docs/RELEASING.md#native-keychain-access).
 
