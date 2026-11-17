@@ -4,7 +4,7 @@
 
 - Read [README.md](README.md) for the product, current behavior, setup, and evidence limits, and [CONTRIBUTING.md](CONTRIBUTING.md) for the development, verification, and independent subagent review workflow.
 - Read [DISCUSSIONS.md](DISCUSSIONS.md) before proposing product changes. It records accepted constraints and unresolved topics, not implementation authorization. Keep it current when a discussion is resolved or a new durable question is accepted.
-- For packaging or publication, also read [docs/RELEASING.md](docs/RELEASING.md). Mac installation currently uses Apple Silicon DMGs distributed through GitHub prereleases; release preparation, signing credentials, and publication have distinct authorization boundaries.
+- For packaging or publication, also read [docs/RELEASING.md](docs/RELEASING.md). Mac installation currently uses Apple Silicon DMGs distributed through GitHub prereleases; release preparation, signing credentials, and publication have distinct authorization boundaries. An explicitly authorized release includes updating the README and website download metadata, merging the reviewed metadata PR, and verifying its automatic Netlify production deployment and live download under that guide; do not wait for a separate website request.
 - Check the actual branch/worktree, latest fetched main, task scope, and any relevant local task status before editing. A fresh session must work from tracked guidance without requiring this chat or ignored `.projects` files. Personal model assignments remain outside the public repository.
 
 ## Scope and current state
