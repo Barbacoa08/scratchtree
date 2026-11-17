@@ -20,6 +20,44 @@
   const choices = [...COLORS, null];
   let candidate = $state(0);
   let panel: HTMLDivElement;
+  let tooltipNode = $state<HTMLDivElement>();
+  let tooltip = $state<{
+    index: number;
+    owner: 'pointer' | 'keyboard';
+    x: number;
+    y: number;
+    width: number;
+  } | null>(null);
+  function describe(index: number, owner: 'pointer' | 'keyboard') {
+    const button = panel.querySelectorAll<HTMLButtonElement>('button')[index];
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    const bounds = panel.getBoundingClientRect();
+    const left = index % 2 === 0;
+    const room = left
+      ? bounds.left - 12
+      : window.innerWidth - bounds.right - 12;
+    const width = Math.min(160, Math.max(24, room));
+    tooltip = {
+      index,
+      owner,
+      width,
+      x: left ? bounds.left - 8 - width : bounds.right + 8,
+      y: Math.max(4, Math.min(rect.top, window.innerHeight - 56)),
+    };
+  }
+  $effect(() => {
+    const node = tooltipNode;
+    const description = tooltip;
+    if (!node || !description) return;
+    function fit() {
+      node!.style.top = `${Math.max(4, Math.min(description!.y, window.innerHeight - node!.getBoundingClientRect().height - 4))}px`;
+    }
+    const observer = new ResizeObserver(fit);
+    observer.observe(node);
+    fit();
+    return () => observer.disconnect();
+  });
   let reposition = () => {};
   // Recheck clipping after a pending write settles, even if the popup size is unchanged.
   $effect(() => {
@@ -83,9 +121,15 @@
           : left - gap - popup.width >= gap
             ? left - gap - popup.width
             : right - popup.width;
-      panel.style.left = `${Math.max(gap, Math.min(x, window.innerWidth - gap - popup.width))}px`;
+      // Reserve space on both sides for descriptions without covering swatches.
+      const reserve = Math.min(
+        176,
+        Math.max(gap, (window.innerWidth - popup.width) / 2),
+      );
+      panel.style.left = `${Math.max(reserve, Math.min(x, window.innerWidth - reserve - popup.width))}px`;
       panel.style.top = `${Math.max(gap, Math.min(top, lowerEdge - popup.height))}px`;
       panel.style.visibility = 'visible';
+      if (tooltip) describe(tooltip.index, tooltip.owner);
     }
     function schedulePosition() {
       if (!frame) frame = requestAnimationFrame(position);
@@ -157,6 +201,7 @@
       if (event.key === 'Home') candidate -= candidate % 2;
       if (event.key === 'End') candidate += 1 - (candidate % 2);
       focusCandidate();
+      describe(candidate, 'keyboard');
     }
     if (disabled && [' ', 'Enter'].includes(event.key)) event.preventDefault();
   }
@@ -209,6 +254,19 @@
               tabindex={candidate === row + column ? 0 : -1}
               onfocus={() => {
                 if (!disabled) candidate = row + column;
+                describe(row + column, 'keyboard');
+              }}
+              aria-describedby={tooltip?.index === row + column
+                ? 'color-choice-tooltip'
+                : undefined}
+              onpointerenter={() => describe(row + column, 'pointer')}
+              onpointermove={() => describe(row + column, 'pointer')}
+              onpointerleave={() => {
+                if (
+                  tooltip?.owner === 'pointer' &&
+                  tooltip.index === row + column
+                )
+                  tooltip = null;
               }}
               onclick={(event) => {
                 if (disabled) {
@@ -238,3 +296,20 @@
   </div>
   {#if error}<p role="alert">{error}</p>{/if}
 </div>
+
+{#if tooltip}
+  <div
+    id="color-choice-tooltip"
+    bind:this={tooltipNode}
+    class="color-tooltip"
+    role="tooltip"
+    style:left={`${tooltip.x}px`}
+    style:top={`${tooltip.y}px`}
+    style:width={`${tooltip.width}px`}
+    style:box-sizing="border-box"
+  >
+    {choices[tooltip.index]
+      ? `${markerColors[choices[tooltip.index]!]} (${choices[tooltip.index]})`
+      : 'Reset color'}
+  </div>
+{/if}

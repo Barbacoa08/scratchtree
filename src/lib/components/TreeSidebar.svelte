@@ -6,12 +6,14 @@
   import RootIcon from './RootIcon.svelte';
   let {
     presentation,
+    showCommandHints = false,
     currentId,
     live = true,
     disabled,
     onopen,
   }: {
     presentation: HierarchyPresentation;
+    showCommandHints?: boolean;
     currentId: string | null;
     live?: boolean;
     disabled: boolean;
@@ -24,6 +26,12 @@
       next.add(tree.id);
     expanded = next;
   });
+  let shortcuts = $derived(
+    presentation
+      .rows(new Set())
+      .slice(0, 8)
+      .map((row) => row.tree.id),
+  );
   let rows = $derived(presentation.rows(expanded));
 </script>
 
@@ -38,7 +46,7 @@
   <hr class="root-separator" />
   {#each rows as row (row.tree.id)}
     <div
-      class="tree-row"
+      class="tree-row navigation-hint-anchor"
       class:current={currentId === row.tree.id}
       style:padding-left={`${Math.min(row.depth, 2) * 8}px`}
     >
@@ -70,6 +78,10 @@
             >Level {row.depth + 1}</span
           >{/if}</button
       >
+      {#if showCommandHints && shortcuts.includes(row.tree.id)}<span
+          class="command-hint tree-command-hint"
+          aria-hidden="true">⌘{shortcuts.indexOf(row.tree.id) + 2}</span
+        >{/if}
     </div>
   {/each}
 </nav>

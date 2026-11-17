@@ -384,7 +384,8 @@ kbd {
   align-items: center;
   gap: 0.15rem;
 }
-.card-actions button {
+.card-actions button,
+.code-copy {
   display: grid;
   place-items: center;
   width: 1.5rem;
@@ -392,11 +393,14 @@ kbd {
   padding: 0.2rem;
   background: transparent;
   border-color: transparent;
+  color: var(--muted);
 }
-.card-actions button:focus-visible {
+.card-actions button:focus-visible,
+.code-copy:focus-visible {
   outline-offset: -2px;
 }
-.card-actions svg {
+.card-actions svg,
+.code-copy svg {
   width: 1rem;
   height: 1rem;
   fill: none;
@@ -443,16 +447,19 @@ kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .code-block {
+  position: relative;
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--border);
   background: var(--code-block);
   padding: 0.5rem;
+  padding-inline-end: 4rem;
   counter-reset: code-line;
 }
 .code-block code {
   display: block;
+  overflow-x: auto;
   white-space: pre;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -1593,6 +1600,42 @@ main:has(.workspace) .sidebar {
 }
 html[data-theme='light'] .note-card.done .markdown-view {
   opacity: 1;
+}
+
+.cm-strikethrough {
+  text-decoration: line-through;
+}
+.note-body.preview-collapsed {
+  max-height: var(--preview-line);
+  min-height: 0;
+  overflow: hidden;
+}
+.code-copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+}
+.tree-command-hint {
+  right: 0.3rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.color-tooltip {
+  position: fixed;
+  z-index: 16;
+  pointer-events: none;
+  background: var(--popup-background);
+  color: var(--popup-text);
+  border: 1px solid var(--popup-border);
+  border-radius: 4px;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  box-shadow: 0 0.2rem 0.6rem var(--overlay-shadow);
+}
+
+.note-body.preview-collapsed .note-rendered {
+  transform: translateY(calc(-1 * var(--preview-offset)));
 }
 
 .auth-footer {

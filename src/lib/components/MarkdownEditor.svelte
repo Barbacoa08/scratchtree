@@ -27,6 +27,7 @@
     HighlightStyle,
     indentOnInput,
   } from '@codemirror/language';
+  import { Strikethrough } from '@lezer/markdown';
   import { tags } from '@lezer/highlight';
   import {
     sourceExtensions,
@@ -99,6 +100,7 @@
     { tag: tags.comment, color: 'var(--editor-comment)' },
     { tag: tags.emphasis, class: 'cm-emphasis' },
     { tag: tags.strong, class: 'cm-strong' },
+    { tag: tags.strikethrough, class: 'cm-strikethrough' },
     { tag: tags.monospace, class: 'cm-code' },
     { tag: tags.heading1, class: 'cm-heading-1' },
     { tag: tags.heading2, class: 'cm-heading-2' },
@@ -169,6 +171,7 @@
         indentWithTab,
       ]),
       markdown({
+        extensions: [Strikethrough],
         codeLanguages: (info) => {
           const lang = info.trim().split(/\s/)[0].toLowerCase();
           return /^(js|javascript|ts|typescript)$/.test(lang)

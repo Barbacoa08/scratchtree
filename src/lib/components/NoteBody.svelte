@@ -3,6 +3,10 @@
   import type { EditorState } from '@codemirror/state';
   import MarkdownEditor from './MarkdownEditor.svelte';
   import MarkdownView from './MarkdownView.svelte';
+  import {
+    exceedsPreviewLines,
+    firstPreviewLine,
+  } from '../workspace/rendered-lines';
   import { firstLineCenter } from '../workspace/first-line';
   let {
     id,
@@ -18,6 +22,7 @@
     onblur,
     onfocus,
     onopen,
+    oncopycode,
     oncontext,
     expanded,
     onexpand,
@@ -39,6 +44,7 @@
     onblur: () => void;
     onfocus: () => void;
     onopen: (url: string) => void;
+    oncopycode: (code: string) => void;
     oncontext: (fenced: boolean) => void;
   } = $props();
   let body: HTMLDivElement;
@@ -48,6 +54,8 @@
   let overflow = $state(false);
   let naturalHeight = $state(0);
   let cap = $state(384);
+  let firstLineHeight = $state(20);
+  let firstLineOffset = $state(0);
   let changed = $state(false);
   let entrySource = $state('');
   let wasEditing = false;
@@ -110,12 +118,26 @@
       parseFloat(getComputedStyle(body).getPropertyValue('--note-cap')) *
       parseFloat(getComputedStyle(document.documentElement).fontSize);
     cap = nextCap;
+    const style = getComputedStyle(body);
+    const lineHeight = parseFloat(style.lineHeight);
     if (!editing && rendered) {
       naturalHeight = rendered.getBoundingClientRect().height;
-      overflow = naturalHeight > cap + 1;
+      const first = firstPreviewLine(rendered);
+      firstLineHeight = first.height;
+      firstLineOffset = first.offset;
+      overflow = content ? exceedsPreviewLines(content) : false;
       if (!overflow && expanded) onexpand(false);
+      const edge = body.getBoundingClientRect().top + firstLineHeight;
+      for (const control of rendered.querySelectorAll<HTMLElement>(
+        'a,button',
+      )) {
+        control.inert =
+          overflow &&
+          !expanded &&
+          control.getBoundingClientRect().bottom > edge + 1;
+      }
     } else if (changed) {
-      overflow = naturalHeight > cap + 1;
+      overflow = naturalHeight > lineHeight * 5 + 1;
     } else overflow = savedOverflow;
   }
   $effect(() => {
@@ -141,8 +163,13 @@
       // This rendered-source mirror reacts to wrapping, text scaling, and late fonts.
       // It never uses the taller raw editor source as the entry footprint.
       const minimum = parseFloat(getComputedStyle(body).minHeight);
-      savedBaseline = Math.max(minimum, node!.getBoundingClientRect().height);
-      savedOverflow = savedBaseline > cap + 1;
+      const rendered = node!.querySelector<HTMLElement>('.markdown-view');
+      savedOverflow = rendered ? exceedsPreviewLines(rendered) : false;
+      firstLineHeight = firstPreviewLine(node!).height;
+      savedBaseline =
+        savedOverflow && !expanded
+          ? firstLineHeight
+          : Math.max(minimum, node!.getBoundingClientRect().height);
       if (!changed) overflow = savedOverflow;
     }
     const observer = new ResizeObserver(resizeBaseline);
@@ -175,6 +202,9 @@
   class="note-body"
   class:body-editing={editing}
   class:expanded
+  class:preview-collapsed={!editing && overflow && !expanded}
+  style:--preview-line={`${firstLineHeight}px`}
+  style:--preview-offset={`${firstLineOffset}px`}
   bind:this={body}
   style:height={height === undefined ? undefined : `${height}px`}
 >
@@ -185,7 +215,11 @@
       aria-hidden="true"
       inert
     >
-      <MarkdownView source={entrySource} onopen={() => {}} />
+      <MarkdownView
+        source={entrySource}
+        onopen={() => {}}
+        oncopycode={() => {}}
+      />
     </div>
     <MarkdownEditor
       bind:this={editor}
@@ -204,7 +238,7 @@
     />
   {:else}
     <div class="note-rendered" bind:this={rendered}>
-      <MarkdownView source={markdown} {onopen} />
+      <MarkdownView source={markdown} {onopen} {oncopycode} />
     </div>
   {/if}
 </div>

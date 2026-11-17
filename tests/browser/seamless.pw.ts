@@ -1,3 +1,4 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { test, expect, type Page } from '@playwright/test';
 const capture = (p: Page) =>
   p.getByRole('textbox', { name: 'New note Markdown' });
@@ -114,21 +115,21 @@ test('click-away preserves actual new target after delayed save and failure reta
     )
     .toBe('retained failure');
 });
-test('instant Untitled creation uses open parent, deduplicates pending request, and arrows continuously restore exact selection', async ({
+test('synthetic nested trees use their open parent and arrows continuously restore exact selection', async ({
   page,
 }) => {
   await seed(page, []);
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(capture(page)).toBeFocused();
   const parent = await page.evaluate(
     () => (window as any).__test.controller.state.ownerId,
   );
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   const child = await page.evaluate(
     () => (window as any).__test.controller.state.ownerId,
   );
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   const leaf = await page.evaluate(
     () => (window as any).__test.controller.state.ownerId,
   );
@@ -154,7 +155,7 @@ test('instant Untitled creation uses open parent, deduplicates pending request, 
   await capture(page).press('Escape');
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('ArrowLeft');
-  await page.keyboard.press('Meta+n');
+  await createTreeFixture(page);
   await expect(capture(page)).toBeFocused();
   const created = await page.evaluate(() =>
     (window as any).__test.repo.snapshot.items
@@ -237,46 +238,45 @@ for (const large of [false, true])
     });
   });
 
-test('pending instant creation is idempotent and honors a newer Search focus', async ({
+test('pending Command-N promotion is idempotent and honors a newer Search focus', async ({
   page,
 }) => {
   await seed(page, ['saved']);
   await page.locator('.note-card[data-kind="note"]').click();
   await page.keyboard.press('e');
-  await inline(page).fill('latest before creation');
+  await inline(page).fill('latest before promotion');
   await page.evaluate(() => {
     const t = (window as any).__test;
-    t.repo.delayCreate = new Promise<void>((r) => (t.releaseCreate = r));
+    const promote = t.repo.transitionLocation.bind(t.repo);
+    t.promotions = 0;
+    t.repo.transitionLocation = async (request: any) => {
+      t.promotions++;
+      await new Promise<void>((resolve) => {
+        t.releasePromotion = resolve;
+      });
+      return promote(request);
+    };
   });
   await page.keyboard.press('Meta+n');
   await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).__test.controller.state.operation),
-    )
-    .toBe('create-tree');
+    .poll(() => page.evaluate(() => (window as any).__test.promotions))
+    .toBe(1);
   await page.keyboard.press('Meta+n');
   await page.getByRole('searchbox').fill('new intent');
-  await page.evaluate(() => (window as any).__test.releaseCreate());
+  await page.evaluate(() => (window as any).__test.releasePromotion());
   await expect
     .poll(() =>
-      page.evaluate(
-        () =>
-          (window as any).__test.repo.snapshot.items.filter(
-            (x: any) => x.kind === 'tree',
-          ).length,
-      ),
+      page.evaluate(() => (window as any).__test.repo.snapshot.items[0].kind),
     )
-    .toBe(2);
+    .toBe('tree');
+  expect(await page.evaluate(() => (window as any).__test.promotions)).toBe(1);
   await expect(page.getByRole('searchbox')).toBeFocused();
   await expect(page.getByRole('searchbox')).toHaveValue('new intent');
   expect(
     await page.evaluate(
-      () =>
-        (window as any).__test.repo.snapshot.items.filter(
-          (x: any) => x.kind === 'tree' && x.markdown !== 'Untitled',
-        )[0].markdown,
+      () => (window as any).__test.repo.snapshot.items[0].markdown,
     ),
-  ).toBe('latest before creation');
+  ).toBe('latest before promotion');
 });
 test('selected deletion, empty child, and replacement reset navigation memory while search opens the exact owner', async ({
   page,

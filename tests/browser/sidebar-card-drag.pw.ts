@@ -1,3 +1,4 @@
+import { createTreeFixture } from '../fixtures/navigation';
 import { expect, test, type Page, type Locator } from '@playwright/test';
 const capture = (p: Page) =>
   p.getByRole('textbox', { name: 'New note Markdown' });
@@ -150,7 +151,7 @@ for (const scale of [100, 150]) {
         .locator('.sidebar')
         .evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft)),
     ).toBe(6);
-    for (let i = 0; i < 18; i++) await page.keyboard.press('Meta+n');
+    for (let i = 0; i < 18; i++) await createTreeFixture(page);
     const nav = page.getByRole('navigation', { name: 'Trees' });
     await expect(nav).toHaveCSS('overflow-y', 'visible');
     const deep = page

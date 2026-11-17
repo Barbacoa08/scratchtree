@@ -23,18 +23,26 @@
     onconfirm: (location: Location) => void;
     oncancel: () => void;
   } = $props();
+  let query = $state('');
+  let search: HTMLInputElement;
+  let filtered = $derived(
+    destinations.filter((destination) =>
+      `${destination.label} ${destination.path}`
+        .toLowerCase()
+        .includes(query.trim().toLowerCase()),
+    ),
+  );
   let list = $state<HTMLElement>();
   let staged = $state(0);
   let dialog: HTMLDialogElement;
   function mount(node: HTMLDialogElement) {
     dialog = node;
     node.showModal();
-    list?.focus();
+    search?.focus();
     return { destroy: () => node.close() };
   }
   function confirm() {
-    if (!pending && destinations[staged])
-      onconfirm(destinations[staged].location);
+    if (!pending && filtered[staged]) onconfirm(filtered[staged].location);
   }
   function keydown(event: KeyboardEvent) {
     event.stopPropagation();
@@ -42,7 +50,7 @@
     if (event.key === 'Tab') {
       const controls = Array.from(
         dialog.querySelectorAll<HTMLElement>(
-          '[tabindex="0"],button:not(:disabled)',
+          'input:not(:disabled),[tabindex="0"],button:not(:disabled)',
         ),
       );
       const index = controls.indexOf(document.activeElement as HTMLElement);
@@ -62,6 +70,10 @@
       if (!pending) oncancel();
       return;
     }
+    if (event.target === search && event.key === 'Enter') {
+      event.preventDefault();
+      return;
+    }
     if (event.target !== list) return;
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -76,11 +88,11 @@
         event.key === 'Home'
           ? 0
           : event.key === 'End'
-            ? destinations.length - 1
+            ? filtered.length - 1
             : Math.max(
                 0,
                 Math.min(
-                  destinations.length - 1,
+                  filtered.length - 1,
                   staged + (event.key === 'ArrowDown' ? 1 : -1),
                 ),
               );
@@ -121,6 +133,19 @@
     {count === 1 ? 'note' : 'notes'}. Independently deleted descendants stay in
     Trash when their parent moves to Root.
   </p>
+  <label for="move-search">Search destinations</label>
+  <input
+    id="move-search"
+    type="search"
+    bind:this={search}
+    value={query}
+    disabled={pending || locked}
+    oninput={(event) => {
+      query = event.currentTarget.value;
+      staged = 0;
+      if (list) list.scrollTop = 0;
+    }}
+  />
   <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div
     class="destinations"
@@ -128,12 +153,12 @@
     aria-label="Destination"
     tabindex="0"
     bind:this={list}
-    aria-activedescendant={destinations.length
+    aria-activedescendant={filtered.length
       ? `move-destination-${staged}`
       : undefined}
     aria-disabled={pending || locked}
   >
-    {#each destinations as destination, index (destination.key)}
+    {#each filtered as destination, index (destination.key)}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <div
         role="option"
@@ -155,11 +180,11 @@
       </div>
     {/each}
   </div>
-  {#if !destinations.length}<p>No eligible destinations.</p>{/if}
+  {#if !filtered.length}<p>No matching destinations.</p>{/if}
   {#if error}<p role="alert">{error}</p>{/if}
   <div class="actions">
     <button disabled={pending} onclick={oncancel}>Cancel</button>
-    <button disabled={pending || !destinations.length} onclick={confirm}
+    <button disabled={pending || !filtered.length} onclick={confirm}
       >{pending ? 'Moving…' : locked ? 'Retry move' : 'Move'}</button
     >
   </div>
@@ -196,6 +221,16 @@
   }
   p {
     margin: 0.75rem 0;
+  }
+  input {
+    min-width: 0;
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    color: inherit;
+    background: var(--control);
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    font: inherit;
   }
   .destinations {
     min-height: 0;

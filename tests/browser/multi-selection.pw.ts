@@ -253,7 +253,7 @@ test('an all-sibling selection has neutral keyboard boundaries and no unavailabl
   );
   await page.keyboard.down('Meta');
   await expect(page.locator('.stream-command-hint')).toHaveText(
-    '⌘N New tree · ⌘⌫ Delete',
+    '⌘N Write a note · ⌘⌫ Delete',
   );
   await page.keyboard.up('Meta');
   await page.keyboard.press('Meta+ArrowUp');
