@@ -308,6 +308,67 @@ test('wrapped text counts toward collapse and hidden code controls stay outside 
   ).toBe(false);
 });
 
+for (const kind of ['fenced', 'indented'])
+  for (const scale of [100, 150])
+    test(`collapsed ${kind} code remains clickable and keyboard reachable at ${scale}%`, async ({
+      page,
+      browserName,
+    }) => {
+      const code =
+        'firstCodeLine();\nsecondCodeLine();\nthird();\nfourth();\nfifth();\nsixth();\n';
+      const source =
+        kind === 'fenced'
+          ? '```js\n' + code + '```'
+          : code
+              .split('\n')
+              .map((line) => (line ? '    ' + line : ''))
+              .join('\n');
+      if (scale === 150)
+        await page.addInitScript(() => {
+          document.addEventListener('DOMContentLoaded', () => {
+            document.documentElement.style.setProperty(
+              'font-size',
+              '24px',
+              'important',
+            );
+          });
+        });
+      const ids = await seed(page, [source]);
+      const note = card(page, ids[0]);
+      const expand = note.getByRole('button', { name: 'Expand note' });
+      await expect(expand).toBeVisible();
+      const before = await state(page);
+      // Use the DOM locator so the broken inert control still reaches the pointer check.
+      const copy = note.locator('.code-copy');
+      await copy.click({ timeout: 3000 });
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__copies))
+        .toEqual([code]);
+      await expand.focus();
+      // WebKit follows macOS's Option-Tab policy for visiting buttons.
+      const previousControl =
+        browserName === 'webkit' ? 'Alt+Shift+Tab' : 'Shift+Tab';
+      await page.keyboard.press(previousControl);
+      // Chromium also visits horizontally overflowing code as a scroll region.
+      const codeRegion = note.locator('.code-block code');
+      if (
+        await codeRegion.evaluate(
+          (element) => document.activeElement === element,
+        )
+      )
+        await page.keyboard.press(previousControl);
+      await expect(copy).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__copies))
+        .toEqual([code, code]);
+      await expect(expand).toHaveAttribute('aria-expanded', 'false');
+      await expect(
+        page.getByRole('textbox', { name: 'Edit Markdown' }),
+      ).toHaveCount(0);
+      expect(await state(page)).toEqual(before);
+    });
+
 test('all Command-2 through Command-9 destinations use direct sibling order after nested rows', async ({
   page,
 }) => {

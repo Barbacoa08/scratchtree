@@ -127,14 +127,17 @@
       firstLineOffset = first.offset;
       overflow = content ? exceedsPreviewLines(content) : false;
       if (!overflow && expanded) onexpand(false);
-      const edge = body.getBoundingClientRect().top + firstLineHeight;
+      // Match the text slice even before its collapse transform has settled.
+      const previewTop = rendered.getBoundingClientRect().top + first.offset;
+      const previewBottom = previewTop + first.height;
       for (const control of rendered.querySelectorAll<HTMLElement>(
         'a,button',
       )) {
+        const rect = control.getBoundingClientRect();
         control.inert =
           overflow &&
           !expanded &&
-          control.getBoundingClientRect().bottom > edge + 1;
+          (rect.bottom <= previewTop || rect.top >= previewBottom);
       }
     } else if (changed) {
       overflow = naturalHeight > lineHeight * 5 + 1;
