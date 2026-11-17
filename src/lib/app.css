@@ -384,7 +384,8 @@ kbd {
   align-items: center;
   gap: 0.15rem;
 }
-.card-actions button {
+.card-actions button,
+.code-copy {
   display: grid;
   place-items: center;
   width: 1.5rem;
@@ -392,11 +393,14 @@ kbd {
   padding: 0.2rem;
   background: transparent;
   border-color: transparent;
+  color: var(--muted);
 }
-.card-actions button:focus-visible {
+.card-actions button:focus-visible,
+.code-copy:focus-visible {
   outline-offset: -2px;
 }
-.card-actions svg {
+.card-actions svg,
+.code-copy svg {
   width: 1rem;
   height: 1rem;
   fill: none;
@@ -1610,15 +1614,6 @@ html[data-theme='light'] .note-card.done .markdown-view {
   position: absolute;
   top: 0.35rem;
   right: 0.35rem;
-  display: block;
-  margin: 0 0 0.4rem auto;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--control);
-  color: var(--text);
-  padding: 0.15rem 0.4rem;
-  font: inherit;
-  font-size: 0.75rem;
 }
 .tree-command-hint {
   right: 0.3rem;

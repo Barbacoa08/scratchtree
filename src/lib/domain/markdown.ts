@@ -5,6 +5,7 @@ import {
 } from '@codemirror/lang-javascript';
 import { jsonLanguage } from '@codemirror/lang-json';
 import { classHighlighter, highlightTree } from '@lezer/highlight';
+import { copyIcon } from '../copy-icon';
 
 /** Links are explicit external actions, never navigation in the app WebView. */
 export function externalUrl(source: string): string | null {
@@ -122,7 +123,7 @@ function codeBlock(
   // This private parser is rendered only through renderMarkdownBlocks.
   const env = environment as CodeEnvironment;
   const index = env.code.push(codeSource(token, env.lines)) - 1;
-  return `<pre class="code-block"><button type="button" class="code-copy" aria-label="Copy code" data-code-index="${index}">Copy</button><code>${highlightCode(token.content, info)}</code></pre>\n`;
+  return `<pre class="code-block"><button type="button" class="code-copy" aria-label="Copy code" title="Copy code" data-code-index="${index}">${copyIcon}</button><code>${highlightCode(token.content, info)}</code></pre>\n`;
 }
 parser.renderer.rules.fence = (tokens, index, _options, env) =>
   codeBlock(tokens[index], tokens[index].info, env);

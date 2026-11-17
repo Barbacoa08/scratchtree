@@ -454,3 +454,83 @@ test('long code scrolls within a region that leaves Copy unobstructed', async ({
     (await note.getByRole('button', { name: 'Copy code' }).boundingBox())!.x,
   );
 });
+
+for (const theme of ['Light', 'Dark'])
+  for (const scale of [100, 150])
+    test(`code Copy matches the note Copy Markdown icon button in ${theme} at ${scale}%`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width: 1000, height: 800 });
+      const ids = await seed(page, ['```js\nconst value = 7;\n```']);
+      await page.getByRole('radio', { name: theme, exact: true }).check();
+      if (scale === 150)
+        await page.addStyleTag({ content: ':root{font-size:24px!important}' });
+      const note = card(page, ids[0]);
+      await note.locator('.code-line').click();
+      const noteCopy = note.getByRole('button', {
+        name: 'Copy Markdown',
+        exact: true,
+      });
+      const codeCopy = note.getByRole('button', {
+        name: 'Copy code',
+        exact: true,
+      });
+      await expect(codeCopy.locator('svg')).toHaveCount(1);
+      await expect(codeCopy).toHaveText('');
+      await expect(codeCopy).toHaveAttribute('title', 'Copy code');
+      const geometry = (button: HTMLElement | SVGElement) => {
+        const style = getComputedStyle(button);
+        const svg = button.querySelector('svg')!;
+        const icon = getComputedStyle(svg);
+        return {
+          button: Object.fromEntries(
+            [
+              'width',
+              'height',
+              'padding',
+              'backgroundColor',
+              'borderColor',
+              'borderWidth',
+              'borderRadius',
+              'color',
+            ].map((key) => [key, style[key as any]]),
+          ),
+          icon: Object.fromEntries(
+            [
+              'width',
+              'height',
+              'fill',
+              'stroke',
+              'strokeWidth',
+              'strokeLinecap',
+              'strokeLinejoin',
+            ].map((key) => [key, icon[key as any]]),
+          ),
+          viewBox: svg.getAttribute('viewBox'),
+          paths: Array.from(svg.querySelectorAll('path')).map((path) =>
+            path.getAttribute('d'),
+          ),
+          hidden: svg.getAttribute('aria-hidden'),
+        };
+      };
+      expect(await codeCopy.evaluate(geometry)).toEqual(
+        await noteCopy.evaluate(geometry),
+      );
+      // WebKit's native button Tab order depends on full-keyboard-access preferences.
+      await page.keyboard.press('Tab');
+      await codeCopy.focus();
+      await expect(codeCopy).toBeFocused();
+      await expect(codeCopy).toHaveCSS('outline-style', 'solid');
+      await page.screenshot({
+        path: testInfo.outputPath(`copy-icon-${theme}-${scale}.png`),
+      });
+      await codeCopy.press('Enter');
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__copies))
+        .toEqual(['const value = 7;\n']);
+      await codeCopy.locator('svg').click();
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__copies))
+        .toEqual(['const value = 7;\n', 'const value = 7;\n']);
+      await expect(note).toHaveClass(/selected/);
+    });

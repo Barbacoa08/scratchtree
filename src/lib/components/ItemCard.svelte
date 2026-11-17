@@ -6,6 +6,7 @@
   import { markerColors } from '../workspace/colors';
   import { timestampPresentation } from '../domain/timestamps';
   import NoteBody from './NoteBody.svelte';
+  import { copyIcon } from '../copy-icon';
   let {
     item,
     selected,
@@ -184,9 +185,7 @@
           aria-label="Copy Markdown"
           title="Copy Markdown"
         >
-          <svg viewBox="0 0 16 16" aria-hidden="true"
-            ><path d="M6 5h7v9H6zM3 11H2V2h7v1" /></svg
-          >
+          {@html copyIcon}
         </button>
         <button
           {disabled}
