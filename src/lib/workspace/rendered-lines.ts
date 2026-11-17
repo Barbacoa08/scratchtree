@@ -40,7 +40,7 @@ export function firstPreviewLine(content: HTMLElement): {
     const parent = node.parentElement;
     if (
       !parent ||
-      parent.closest('button,.sr-only,.code-copy-feedback') ||
+      parent.closest('button,.sr-only') ||
       !node.textContent?.trim()
     )
       continue;

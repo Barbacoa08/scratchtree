@@ -152,7 +152,7 @@ test('strikethrough styles edit text while retaining delimiters and literal code
   ).toHaveCount(0);
 });
 
-test('code chunk copies only exact code and reports clipboard failure without changing selection', async ({
+test('code copy reports success and failure in workspace status without changing the note', async ({
   page,
 }) => {
   const ids = await seed(page, [
@@ -162,16 +162,31 @@ test('code chunk copies only exact code and reports clipboard failure without ch
     name: 'Copy code',
     exact: true,
   });
+  await card(page, ids[0]).getByText('before', { exact: true }).click();
+  const before = await state(page);
+  const renderedBefore = await card(page, ids[0]).innerText();
+  const status = page.getByRole('region', { name: 'Editor status' });
   await button.click();
+  await expect(status.getByRole('status')).toHaveText('Code copied');
+  expect(await card(page, ids[0]).innerText()).toBe(renderedBefore);
+  await expect(card(page, ids[0])).toHaveClass(/selected/);
   expect(await page.evaluate(() => (window as any).__copies)).toEqual([
     'const x = "<&>";\n\n  indented();\n',
   ]);
-  const before = await state(page);
+  expect(await state(page)).toEqual(before);
   await page.evaluate(() => ((window as any).__copyFails = true));
   await button.click();
-  await expect(card(page, ids[0]).locator('.code-copy-feedback')).toContainText(
-    'Copy failed',
+  await expect(status.getByRole('alert')).toHaveText(
+    'Copy failed. Your code is unchanged; retry Copy code.',
   );
+  expect(await card(page, ids[0]).innerText()).toBe(renderedBefore);
+  await expect(card(page, ids[0])).toHaveClass(/selected/);
+  expect(await state(page)).toEqual(before);
+  await page.evaluate(() => ((window as any).__copyFails = false));
+  await button.press('Enter');
+  await expect(status.getByRole('status')).toHaveText('Code copied');
+  await expect(status.getByRole('alert')).toBeHidden();
+  expect(await card(page, ids[0]).innerText()).toBe(renderedBefore);
   expect(await state(page)).toEqual(before);
 });
 

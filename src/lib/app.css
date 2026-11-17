@@ -1634,15 +1634,6 @@ html[data-theme='light'] .note-card.done .markdown-view {
   box-shadow: 0 0.2rem 0.6rem var(--overlay-shadow);
 }
 
-.code-copy-feedback {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--muted);
-}
-.code-copy-feedback:empty {
-  display: none;
-}
-
 .note-body.preview-collapsed .note-rendered {
   transform: translateY(calc(-1 * var(--preview-offset)));
 }

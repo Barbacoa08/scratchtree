@@ -22,6 +22,7 @@
     onblur,
     onfocus,
     onopen,
+    oncopycode,
     oncontext,
     expanded,
     onexpand,
@@ -43,6 +44,7 @@
     onblur: () => void;
     onfocus: () => void;
     onopen: (url: string) => void;
+    oncopycode: (code: string) => void;
     oncontext: (fenced: boolean) => void;
   } = $props();
   let body: HTMLDivElement;
@@ -213,7 +215,11 @@
       aria-hidden="true"
       inert
     >
-      <MarkdownView source={entrySource} onopen={() => {}} />
+      <MarkdownView
+        source={entrySource}
+        onopen={() => {}}
+        oncopycode={() => {}}
+      />
     </div>
     <MarkdownEditor
       bind:this={editor}
@@ -232,7 +238,7 @@
     />
   {:else}
     <div class="note-rendered" bind:this={rendered}>
-      <MarkdownView source={markdown} {onopen} />
+      <MarkdownView source={markdown} {onopen} {oncopycode} />
     </div>
   {/if}
 </div>

@@ -1,10 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { copyMarkdown } from '../platform/actions';
   import { renderMarkdownBlocks, externalUrl } from '../domain/markdown';
-  let { source, onopen }: { source: string; onopen: (url: string) => void } =
-    $props();
-  let copyStatus = $state('');
+  let {
+    source,
+    onopen,
+    oncopycode,
+  }: {
+    source: string;
+    onopen: (url: string) => void;
+    oncopycode: (code: string) => void;
+  } = $props();
   let host: HTMLDivElement;
   const rendered = $derived(renderMarkdownBlocks(source));
   onMount(() => {
@@ -19,15 +24,7 @@
           const code =
             rendered.code[Number(button.getAttribute('data-code-index'))];
           if (code === undefined) return;
-          void copyMarkdown(code).then(
-            () => {
-              copyStatus = 'Code copied';
-            },
-            () => {
-              copyStatus =
-                'Copy failed. Your code is unchanged; retry Copy code.';
-            },
-          );
+          oncopycode(code);
         }
         return;
       }
@@ -48,5 +45,3 @@
 </script>
 
 <div class="markdown-view" bind:this={host}>{@html rendered.html}</div>
-
-<p class="code-copy-feedback" aria-live="polite">{copyStatus}</p>

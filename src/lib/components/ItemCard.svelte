@@ -37,6 +37,7 @@
     onfocus,
     oncontext,
     onopen,
+    oncopycode,
     onexpand,
     reorderable,
     dropEdge,
@@ -76,6 +77,7 @@
     onfocus: () => void;
     oncontext: (fenced: boolean) => void;
     onopen: (url: string) => void;
+    oncopycode: (code: string) => void;
     onexpand: (expanded: boolean) => void;
     reorderable: boolean;
     dropEdge: 'before' | 'after' | null;
@@ -232,5 +234,6 @@
     {onfocus}
     {oncontext}
     {onopen}
+    {oncopycode}
   />
 </article>

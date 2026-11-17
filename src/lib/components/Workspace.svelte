@@ -838,6 +838,17 @@
       );
     }
   }
+  async function copyCode(code: string) {
+    try {
+      await copyMarkdown(code);
+      controller.feedback('Code copied');
+    } catch {
+      controller.feedback(
+        '',
+        'Copy failed. Your code is unchanged; retry Copy code.',
+      );
+    }
+  }
   async function open(url: string) {
     if (modal) return;
     try {
@@ -2060,6 +2071,7 @@
               onedit={() => void edit(entry.id)}
               ondelete={() => void remove(entry.id)}
               oncopy={() => void copy(entry.id)}
+              oncopycode={(code) => void copyCode(code)}
               ondone={() => void controller.setNoteDone(entry.id, !entry.done)}
               onsource={(source) => controller.editContext(entry.id, source)}
               onsubmit={() => void submit(entry.id)}
