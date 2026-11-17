@@ -1,6 +1,6 @@
 {
-  "version": "0.2.1",
-  "downloadUrl": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.1/Scratchtree_0.2.1_aarch64.dmg",
-  "releaseUrl": "https://github.com/Barbacoa08/scratchtree/releases/tag/v0.2.1",
+  "version": "0.2.2",
+  "downloadUrl": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.2/Scratchtree_0.2.2_aarch64.dmg",
+  "releaseUrl": "https://github.com/Barbacoa08/scratchtree/releases/tag/v0.2.2",
   "testedOn": "macOS 27.2.1 on Apple Silicon Macs"
 }

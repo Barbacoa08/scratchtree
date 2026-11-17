@@ -2,7 +2,7 @@
 
 Scratchtree is a local-first Mac notes app for developers. Capture a thought without leaving the keyboard, write Markdown with its syntax still visible, and keep code snippets, lists, and related notes together in note trees.
 
-Scratchtree is an independent, developer-focused Markdown notes app, inspired by Stashpad Lists. This is an early alpha for Apple Silicon Macs. Version 0.2.1 includes private, existing-account Dexie Cloud synchronization while keeping notes available locally. Public sign-up is not available.
+Scratchtree is an independent, developer-focused Markdown notes app, inspired by Stashpad Lists. This is an early alpha for Apple Silicon Macs. Version 0.2.2 includes private, existing-account Dexie Cloud synchronization while keeping notes available locally. Public sign-up is not available.
 
 Website and downloads: [scratchtree.barbajoe.tech](https://scratchtree.barbajoe.tech).
 
@@ -22,11 +22,11 @@ _Current source preview with synthetic notes; see the download compatibility not
 
 **Scratchtree alpha:** the application has its own name, native identity, note-tree terminology, and backup format. The Mac app keeps running when its window closes and returns through Command+Tab or the Dock.
 
-**Alpha compatibility:** version 0.2.1 uses persistent Dexie IndexedDB, BackupV8, and the release identity introduced in 0.2.0. Updating from 0.2.0 retains that identity and format. The release uses a separate local profile from earlier alphas and never automatically reads an older store. Before updating from the local-only alpha.5, export and retain its unchanged BackupV7, convert a copy with the separate local transfer tool, and verify the import and a fresh export. Signing in does not transfer those old local notes. Keep the original backup and [previous installer](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.1.0-alpha.5) until the transfer is verified. Breaking changes are expected during alpha.
+**Alpha compatibility:** version 0.2.2 uses persistent Dexie IndexedDB, BackupV8, and the release identity introduced in 0.2.0. Updating from 0.2.0 or 0.2.1 retains that identity and format. The release uses a separate local profile from earlier alphas and never automatically reads an older store. Before updating from the local-only alpha.5, export and retain its unchanged BackupV7, convert a copy with the separate local transfer tool, and verify the import and a fresh export. Signing in does not transfer those old local notes. Keep the original backup and [previous installer](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.1.0-alpha.5) until the transfer is verified. Breaking changes are expected during alpha.
 
-[Download Scratchtree v0.2.1 for Apple Silicon](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.1/Scratchtree_0.2.1_aarch64.dmg) · [Release notes](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.2.1)
+[Download Scratchtree v0.2.2 for Apple Silicon](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.2/Scratchtree_0.2.2_aarch64.dmg) · [Release notes](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.2.2)
 
-1. Export a backup before updating, and quit older app copies. The older alpha.5 uses a different backup format: prepare a converted BackupV8 copy before importing it into 0.2.1. See [Transfer from alpha.5](#transfer-from-alpha5) below.
+1. Export a backup before updating, and quit older app copies. The older alpha.5 uses a different backup format: prepare a converted BackupV8 copy before importing it into 0.2.2. See [Transfer from alpha.5](#transfer-from-alpha5) below.
 2. Open the downloaded DMG, drag Scratchtree to Applications, and replace the existing app if prompted. Your app data is stored separately from the app.
 3. Open Scratchtree from Applications. This alpha is ad-hoc signed, but is not Developer ID signed or notarized, so macOS may block the first launch.
 4. If macOS shows a warning, click **Done**. Open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway** for Scratchtree.
@@ -38,8 +38,8 @@ Only open the app if you trust the download. A managed Mac may restrict this opt
 
 The BackupV7 converter is a separate maintainer-assisted tool, not part of the app or a public download. Arrange a private conversion with the maintainer before importing an alpha.5 backup. Do not attach notes or backups to public GitHub issues. Keep using the previous installer until the transfer is arranged.
 
-1. Export a BackupV7 from the old app and retain it unchanged, together with the old installer. Convert a copy to BackupV8 through that private transfer process; do not import BackupV7 directly into 0.2.1.
-2. Open 0.2.1 and sign in to the account that should own the notes. Signing in alone does not transfer the older local library.
+1. Export a BackupV7 from the old app and retain it unchanged, together with the old installer. Convert a copy to BackupV8 through that private transfer process; do not import BackupV7 directly into 0.2.2.
+2. Open 0.2.2 and sign in to the account that should own the notes. Signing in alone does not transfer the older local library.
 3. Choose **Restore backup**, select the converted BackupV8, review the counts, and confirm only when ready. **Restore replaces the current library; while signed in, it replaces the shared library on every Mac.** It does not merge the backup into existing notes.
 4. Wait for **Up to date**, check the notes, and export a fresh BackupV8. Keep the original export and recovery installer until both the transfer and the second-Mac copy are verified. Drafts and Undo import only on this Mac.
 
