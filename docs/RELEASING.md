@@ -1,6 +1,6 @@
 # Mac preview releases
 
-Scratchtree currently installs through an Apple Silicon DMG published as a GitHub prerelease. Releases are manual; there is no automatic updater. The 0.2.2 prerelease includes private-account Dexie Cloud synchronization; the retained alpha.5 installer uses local notes only. State the behavior of the exact installer being released, and do not infer publication authorization from source implementation. [README.md](../README.md#download-and-install) is the user-facing installation guide.
+Scratchtree currently installs through an Apple Silicon DMG published as a GitHub prerelease. Releases are manual; there is no automatic updater. The 0.2.3 prerelease includes private-account Dexie Cloud synchronization; the retained alpha.5 installer uses local notes only. State the behavior of the exact installer being released, and do not infer publication authorization from source implementation. [README.md](../README.md#download-and-install) is the user-facing installation guide.
 
 The alpha is ad-hoc signed, **not Developer ID signed or notarized**. Production signing, credentials, notarization, Intel builds, and other platforms require separate decisions. The permanent release identifier is `tech.barbajoe.scratchtree`; data is stored separately from the application bundle. Alpha changes may break identity or format compatibility, but using actual notes requires a deliberate private backup and transfer plan first.
 
