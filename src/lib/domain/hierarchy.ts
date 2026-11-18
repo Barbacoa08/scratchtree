@@ -54,10 +54,12 @@ export const locationLabel = (trees: Item[], id: string | null): string =>
 export type StreamEntry = Item;
 export function itemLabel(item: Item): string {
   const line = item.markdown.split(/\r\n|\r|\n/, 1)[0].trim();
-  const points = Array.from(line || 'Untitled');
-  return points.length > 32
-    ? points.slice(0, 31).join('') + '…'
-    : points.join('');
+  const points: string[] = [];
+  for (const point of line || 'Untitled') {
+    if (points.length === 32) return points.slice(0, 31).join('') + '…';
+    points.push(point);
+  }
+  return points.join('');
 }
 export function scopeIndex(items: Item[]): Map<string, 'live' | 'trash'> {
   const index = hierarchyIndex(items),
