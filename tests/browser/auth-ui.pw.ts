@@ -64,7 +64,7 @@ test('pending adoption recovery keeps submitted action disabled and closes witho
   );
   await expect(dialog.getByRole('status')).toBeFocused();
   await expect(
-    dialog.getByRole('button', { name: 'Use synced notes' }),
+    dialog.getByRole('button', { name: 'Merge notes' }),
   ).toBeDisabled();
   await page.screenshot({
     path: test.info().outputPath('pending-adoption-recovery.png'),
@@ -233,7 +233,7 @@ test('collapsed details keeps sync recovery accessible', async ({ page }) => {
   ).toBeVisible();
 });
 
-test('joining requires an explicit choice and explains recovery', async ({
+test('joining requires explicit confirmation and explains how notes merge', async ({
   page,
 }) => {
   await page.goto('/?fixture&authFixture');
@@ -250,13 +250,15 @@ test('joining requires an explicit choice and explains recovery', async ({
     dialog.getByText('This Mac has 2 notes. Synced notes: 3.'),
   ).toBeVisible();
   await expect(
-    dialog.getByText('This Mac’s notes will be kept in recovery.'),
+    dialog.getByText(
+      'Both sets of notes will sync to your account. If a note is in both sets, the most recently changed version is kept.',
+    ),
   ).toBeVisible();
   await expect(
-    dialog.getByRole('button', { name: 'Use synced notes' }),
+    dialog.getByRole('button', { name: 'Merge notes' }),
   ).toBeVisible();
-  await dialog.getByRole('button', { name: 'Use synced notes' }).click();
-  await expect(dialog.getByRole('alert')).toHaveText('Synced notes selected.');
+  await dialog.getByRole('button', { name: 'Merge notes' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Note merge requested.');
 });
 
 test('retained email can be resubmitted and restart clears a prior challenge', async ({
@@ -689,7 +691,7 @@ test('initial sync and join adoption provide focused status and actionable decis
       join: { localNotes: 2, cloudNotes: 3 },
     }),
   );
-  const use = dialog.getByRole('button', { name: 'Use synced notes' });
+  const use = dialog.getByRole('button', { name: 'Merge notes' });
   await expect(use).toBeFocused();
   await page.evaluate(() =>
     (window as any).authUiFixture.setAuth({ canCancel: false }),
@@ -749,7 +751,7 @@ test('reopened sync decisions and retry receive focus without stealing newer out
   );
   const dialog = page.getByRole('dialog');
   await expect(
-    dialog.getByRole('button', { name: 'Use synced notes' }),
+    dialog.getByRole('button', { name: 'Merge notes' }),
   ).toBeFocused();
   await dialog.getByRole('button', { name: 'Close' }).click();
   await page.evaluate(() =>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { flushSync } from 'svelte';
   import type { Location } from '../domain/notes';
   export type MoveDestination = {
     key: string;
@@ -70,19 +71,30 @@
       if (!pending) oncancel();
       return;
     }
-    if (event.target === search && event.key === 'Enter') {
-      event.preventDefault();
-      return;
-    }
-    if (event.target !== list) return;
-    if (event.key === 'Enter') {
+    const inSearch = event.target === search;
+    const inResults = event.target === list;
+    if ((inSearch || inResults) && event.key === 'Enter') {
       event.preventDefault();
       if (!event.repeat) confirm();
-    } else if (
-      !pending &&
-      !locked &&
-      ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
-    ) {
+      return;
+    }
+    if (pending || locked || !filtered.length) return;
+    const unmodified =
+      !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
+    if (inSearch && event.key === 'ArrowDown' && unmodified) {
+      event.preventDefault();
+      flushSync(() => (staged = 0));
+      list?.focus();
+      if (list) list.scrollTop = 0;
+      return;
+    }
+    if (!inResults) return;
+    if (event.key === 'ArrowUp' && staged === 0 && unmodified) {
+      event.preventDefault();
+      search.focus();
+      return;
+    }
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
       staged =
         event.key === 'Home'
@@ -137,6 +149,9 @@
   <input
     id="move-search"
     type="search"
+    autocorrect="off"
+    autocapitalize="none"
+    spellcheck="false"
     bind:this={search}
     value={query}
     disabled={pending || locked}

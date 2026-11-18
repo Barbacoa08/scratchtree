@@ -37,6 +37,8 @@ export async function run(which: string) {
     failBarrier = false,
     pulls = 0,
     failAuto = false;
+  let failSafety = false;
+  let safety = '';
   let released!: () => void,
     started!: () => void,
     hook: Promise<void> | undefined;
@@ -60,7 +62,10 @@ export async function run(which: string) {
   const files = {
     chooseRead: async () => null,
     chooseWrite: async () => null,
-    writeSafety: async () => {},
+    writeSafety: async (text: string) => {
+      if (failSafety) throw Error('Synthetic safety backup failure');
+      safety = text;
+    },
   };
   const local = new ScratchtreeDatabase({ name: localName }),
     remote = new ScratchtreeDatabase({ name: cloudName });
@@ -220,10 +225,10 @@ export async function run(which: string) {
   const edit = (note: string) =>
     s.repository.saveItemSource(id, note, { key: id, revision: 0 });
   const libraryId = await digest(['scratchtree-library', who]);
-  const seedRemote = async (text: string, epoch: string) => {
+  const seedRemote = async (text: string, epoch: string, noteId = id) => {
     await remote.libraries.put({ id: libraryId, epoch });
     await remote.notes.put({
-      id,
+      id: noteId,
       epoch,
       markdown: text,
       kind: 'note',
@@ -424,15 +429,80 @@ export async function run(which: string) {
       );
       return 'ok';
     }
-    if (which === 'join' || which === 'changed-join') {
-      await seedRemote('remote', 'new');
+    if (which === 'join-purge-conflict') {
+      const epoch = 'new';
+      await seedRemote('other shared note', epoch, other);
+      await remote.purges.add({ id, epoch, purgedAt: Date.now() });
+      await sign();
+      assert(state.join?.cloudNotes === 1, 'merge requires consent');
+      await s.auth.mergeNotes();
+      assert(
+        state.error?.includes('conflicts with a permanent deletion') &&
+          (await load()).items[0]?.markdown === 'local' &&
+          (await remote.purges.get([epoch, id])) !== undefined &&
+          (await remote.notes.get([epoch, id])) === undefined,
+        'a purge conflict retains both original libraries without resurrecting',
+      );
+      return 'ok';
+    }
+    if (['join', 'changed-join', 'join-conflicts'].includes(which)) {
+      const epoch = 'new';
+      const collision = which === 'join-conflicts';
+      const sharedId = collision ? id : crypto.randomUUID();
+      const child = crypto.randomUUID();
+      const deleted = crypto.randomUUID();
+      const tied = crypto.randomUUID();
+      const localNewer = crypto.randomUUID();
+      await capture('local draft owner', other);
+      await s.repository.promoteItem(other);
+      await s.repository.captureItem({
+        id: child,
+        markdown: 'nested\r\nsource',
+        draft: { key: 'compose:' + other, revision: 0 },
+        location: { scope: 'live', itemId: other },
+      });
+      await capture('retained Trash', deleted);
+      await s.repository.deleteItem(deleted);
+      await s.repository.checkpointDraft('compose:' + other, 'unsent draft', 1);
+      await seedRemote('remote', epoch, sharedId);
+      await remote.orders.add({
+        id: 'root:live',
+        epoch,
+        parentId: null,
+        scope: 'live',
+        ids: [sharedId],
+      });
+      const purged = crypto.randomUUID();
+      const localEpoch = (await local.libraries.get('local'))!.epoch;
+      await local.purges.add({ id: purged, epoch: localEpoch, purgedAt: 123 });
+      if (collision) {
+        await capture('newer local', localNewer);
+        await capture('loses the timestamp tie', tied);
+        const before = await load();
+        const row = (await remote.notes.get([epoch, id]))!;
+        await remote.notes.bulkPut([
+          {
+            ...row,
+            updatedAt: before.items.find((i) => i.id === id)!.updatedAt + 1,
+          },
+          { ...row, id: localNewer, markdown: 'older synced' },
+          {
+            ...row,
+            id: tied,
+            markdown: 'wins the timestamp tie',
+            updatedAt: before.items.find((i) => i.id === tied)!.updatedAt,
+          },
+        ]);
+      }
+      const before = await load();
       await sign();
       assert(
-        state.join?.cloudNotes === 1 && state.join.localNotes === 1,
-        'explicit join required',
+        state.join?.cloudNotes === (collision ? 3 : 1) &&
+          state.join.localNotes === before.items.length,
+        'explicit merge required',
       );
       assert(
-        (await load()).items[0].markdown === 'local',
+        JSON.stringify(await load()) === JSON.stringify(before),
         'preview cannot adopt',
       );
       s.auth.dismiss();
@@ -441,27 +511,79 @@ export async function run(which: string) {
         retryVisible = v.state === 'needs-sync';
       });
       unsub();
-      assert(retryVisible, 'pending join must expose usable Retry sync');
+      assert(retryVisible, 'pending merge must expose usable Retry sync');
       await s.sync.retry();
       assert(state.open, 'retry reopens preview');
       if (which === 'changed-join') {
-        const row = (await remote.notes.get(['new', id]))!;
-        await remote.notes.add({ ...row, id: other, markdown: 'new remote' });
-        await s.auth.acceptCloud!();
+        const row = (await remote.notes.get([epoch, sharedId]))!;
+        await remote.notes.add({
+          ...row,
+          id: crypto.randomUUID(),
+          markdown: 'new remote',
+        });
+        await s.auth.mergeNotes();
         assert(
           state.open &&
             state.join?.cloudNotes === 2 &&
-            state.join.localNotes === 1,
-          'changed join must present current counts for a new decision',
+            state.join.localNotes === before.items.length,
+          'changed merge must present current counts for a new decision',
         );
       }
-      await s.auth.acceptCloud!();
+      failSafety = true;
+      const syncedBefore = JSON.stringify(await remote.notes.toArray());
+      await s.auth.mergeNotes();
       assert(
-        (await load()).items.some((i) => i.markdown === 'remote'),
-        'approved join adopts',
+        state.error === 'Synthetic safety backup failure' &&
+          JSON.stringify(await load()) === JSON.stringify(before) &&
+          JSON.stringify(await remote.notes.toArray()) === syncedBefore,
+        'safety backup failure preserves both libraries',
       );
-      await s.repository.exportBackup();
-      assert(exported.includes('local'), 'local recovery survives join');
+      failSafety = false;
+      await s.auth.mergeNotes();
+      assert(state.phase === 'signed-in', 'merge failed: ' + state.error);
+      const merged = await load();
+      const find = (key: string) => merged.items.find((i) => i.id === key);
+      assert(
+        find(sharedId)?.markdown === 'remote' &&
+          (collision
+            ? find(localNewer)?.markdown === 'newer local' &&
+              find(tied)?.markdown === 'wins the timestamp tie'
+            : find(id)?.markdown === 'local'),
+        'distinct notes survive and overlapping notes use the last write',
+      );
+      assert(
+        find(child)?.parentId === other &&
+          find(child)?.markdown === 'nested\r\nsource' &&
+          find(deleted)?.deletedAt != null &&
+          merged.undoDeleteIds.includes(deleted) &&
+          merged.drafts[0]?.markdown === 'unsent draft',
+        'hierarchy, exact Markdown, Trash, Undo, and drafts survive',
+      );
+      assert(
+        find(sharedId)?.position === 0 &&
+          find(other)!.position > 0 &&
+          (await remote.libraries.get(libraryId))?.epoch === epoch,
+        'merge retains synced order and epoch and appends local siblings',
+      );
+      assert(
+        JSON.parse(safety).library.items.some(
+          (item: { markdown: string }) => item.markdown === 'local',
+        ),
+        'original local notes are in the safety backup',
+      );
+      assert(
+        (await remote.purges.get([epoch, purged]))?.purgedAt === 123,
+        'the local permanent deletion fact retains its timestamp',
+      );
+      const first = await remote.notes.toArray();
+      s.close();
+      s = await open();
+      assert(
+        (await load()).items.length === merged.items.length &&
+          JSON.stringify(await remote.notes.toArray()) ===
+            JSON.stringify(first),
+        'merged notes reopen without duplication',
+      );
       return 'ok';
     }
     if (which === 'empty-pointer') {
@@ -505,6 +627,8 @@ export async function run(which: string) {
         'failed reopen is retryable',
       );
       failAuto = false;
+      let failSafety = false;
+      let safety = '';
       await s.auth.retrySync();
       assert(
         state.phase === 'signed-in' &&
@@ -822,6 +946,8 @@ export async function run(which: string) {
         await entered.wait;
         const queued = c.setNoteDone(id, true);
         failAuto = false;
+        let failSafety = false;
+        let safety = '';
         onReopen = (previous, next) => {
           next.on('ready', async () => {
             await seedRemote('E2 winner', 'next-epoch');

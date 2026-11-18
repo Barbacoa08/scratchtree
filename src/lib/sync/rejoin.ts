@@ -7,6 +7,8 @@ import {
 import { structuralItems } from '../domain/items';
 import { validateSnapshot } from '../domain/validation';
 import { encodeCloudBackup, type BackupV8 } from './backup';
+import { projectLibrary } from './canonical';
+import { orderRows, toSharedItem } from './representation';
 import { snapshotOf, combineArchive, journalFor } from './detached';
 import {
   canonicalJson,
@@ -206,6 +208,50 @@ export function planRejoin(
   }
   return { library, admitted, conflicts };
 }
+/** First sign-in has no shared ancestor. Keep the newer saved version of each exact ID. */
+function mergeInitialLibraries(
+  local: BackupV8,
+  remote: BackupV8,
+  epoch: string,
+): Library {
+  const cloud = snapshotOf(remote);
+  const incoming = snapshotOf(local);
+  const items = new Map(cloud.items.map((item) => [item.id, item]));
+  for (const item of incoming.items) {
+    const synced = items.get(item.id);
+    if (!synced || item.updatedAt > synced.updatedAt) items.set(item.id, item);
+  }
+
+  const purgedIds = [
+    ...new Set([...local.library.purgedIds, ...remote.library.purgedIds]),
+  ];
+  const purged = new Set(purgedIds.map((id) => id.toLowerCase()));
+  for (const id of items.keys()) {
+    if (purged.has(id.toLowerCase()))
+      throw Error(
+        'A saved note conflicts with a permanent deletion. Both libraries were retained.',
+      );
+  }
+
+  // Keep the synced sibling order and append incoming siblings in their local order.
+  const orders = new Map(orderRows(cloud, epoch).map((row) => [row.id, row]));
+  for (const row of orderRows(incoming, epoch)) {
+    const existing = orders.get(row.id);
+    if (existing) existing.ids.push(...row.ids);
+    else orders.set(row.id, row);
+  }
+  const merged = projectLibrary(
+    [...items.values()].map((item) => toSharedItem(item, epoch)),
+    [...orders.values()],
+    [],
+    epoch,
+  );
+  // The same rule as Restore keeps an independently deleted child in Trash.
+  // Other structural repairs would discard a placement we cannot reconcile safely.
+  if (merged.notices.some((notice) => notice.kind !== 'trash-root'))
+    throw Error('The note hierarchies conflict. Both libraries were retained.');
+  return { items: merged.items, purgedIds: purgedIds.sort() };
+}
 /** Build portable device recovery; never leave a losing editor draft as an active overlay. */
 export function reconcileTransfer(
   local: import('./detached').Transfer,
@@ -227,6 +273,7 @@ export function reconcileTransfer(
         !remote.backup.library.purgedIds.length &&
         (local.backup.library.items.length > 0 ||
           local.backup.library.purgedIds.length > 0)));
+  const firstJoin = !baseline && !!remote && !seeded;
   const replacement = local.pending.find(
     (p) =>
       p.localApplied &&
@@ -255,7 +302,9 @@ export function reconcileTransfer(
     conflicts = local.pending.filter((p) => p.epoch !== epoch);
   } else {
     epoch = remote!.epoch;
-    library = remote!.backup.library;
+    library = firstJoin
+      ? mergeInitialLibraries(local.backup, remote!.backup, epoch)
+      : remote!.backup.library;
     if (sameBranch) {
       const result = planRejoin(
         baseline!.library,
@@ -280,7 +329,7 @@ export function reconcileTransfer(
     recordedAt: Date.now(),
     reason: 'detached-conflict' as const,
   };
-  const losingBranch = !seeded && !sameBranch && !replace;
+  const losingBranch = !seeded && !firstJoin && !sameBranch && !replace;
   const snapshot = snapshotOf(local.backup);
   if (
     (losingBranch || conflicts.some((p) => !sourceOfIntent(p))) &&
@@ -362,7 +411,9 @@ export function reconcileTransfer(
     device: { drafts, undoDeleteIds, recovery },
   };
   encodeCloudBackup(backup);
-  const purgeById = new Map(local.purges.map((row) => [row.id, row]));
+  const purgeById = new Map(
+    local.purges.map((row) => [row.id, firstJoin ? { ...row, epoch } : row]),
+  );
   if (remote?.epoch === epoch)
     for (const row of remote.purges) purgeById.set(row.id, row);
   const purges = library.purgedIds.map((id) => {

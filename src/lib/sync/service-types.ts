@@ -28,7 +28,7 @@ export type AuthPort = {
   dismiss(): void;
   signOut(): Promise<void>;
   retrySync(): Promise<void>;
-  acceptCloud?(): Promise<void>;
+  mergeNotes?(): Promise<void>;
 };
 export type SyncState = {
   state: 'local-only' | 'needs-sync' | 'syncing' | 'up-to-date';

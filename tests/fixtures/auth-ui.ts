@@ -93,8 +93,8 @@ export const auth: AuthPort = {
       error: null,
     });
   },
-  async acceptCloud() {
-    setAuth({ join: null, error: 'Synced notes selected.' });
+  async mergeNotes() {
+    setAuth({ join: null, error: 'Note merge requested.' });
   },
   async retrySync() {
     setAuth({ error: null });

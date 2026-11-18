@@ -100,7 +100,7 @@ export class PersistentSession {
           else this.abandonOpening();
         }),
       finishSignIn: () => this.finish(false),
-      acceptCloud: () => this.finish(true),
+      mergeNotes: () => this.finish(true),
       signOut: () => this.signOut(),
     };
     this.auth = new CloudAuthController(host, activation.mode === 'attached');
@@ -715,7 +715,7 @@ export class PersistentSession {
             detail:
               a.error ??
               (a.join
-                ? 'Review which notes to use on this Mac.'
+                ? 'Review and confirm the note merge.'
                 : 'Retrieving your synced notes.'),
           }
         : this.receiptState;

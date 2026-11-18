@@ -33,6 +33,8 @@ for (const scenario of [
   'barrier',
   'join',
   'changed-join',
+  'join-conflicts',
+  'join-purge-conflict',
   'epoch',
   'account',
   'restart-cleanup',
