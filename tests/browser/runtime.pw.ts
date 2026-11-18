@@ -68,9 +68,9 @@ for (const newerFocus of [false, true])
     });
     await page.reload();
     await expect(
-      page.getByRole('heading', { name: 'Could not open your notes' }),
+      page.getByRole('heading', { name: 'Couldn’t open your notes' }),
     ).toBeVisible();
-    const retry = page.getByRole('button', { name: 'Retry opening notes' });
+    const retry = page.getByRole('button', { name: 'Try again' });
     await page.evaluate(() => {
       (window as any).__runtimeOpenMode = 'pending';
     });
@@ -78,7 +78,10 @@ for (const newerFocus of [false, true])
     await retry.press('Enter');
     const pending = page.getByRole('status');
     await expect(pending).toHaveText('Opening your notes…');
-    await expect(retry).toBeDisabled();
+    await expect(retry).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Use separate local notes' }),
+    ).toHaveCount(0);
     if (newerFocus) {
       await page.evaluate(() => {
         const button = document.createElement('button');
@@ -285,7 +288,7 @@ for (const malformed of [false, true])
     },
   );
 
-test('slow native startup explains system permission without taking newer focus', async ({
+test('slow native startup names the Keychain item before opening and continues without taking newer focus', async ({
   page,
 }) => {
   await page.addInitScript(() => {
@@ -306,7 +309,7 @@ test('slow native startup explains system permission without taking newer focus'
       const originalOpen = PersistentSession.open.bind(PersistentSession);
       PersistentSession.open = async options => {
         await options.beforeOpenCloudCache?.();
-        window.__noticeBeforeOpen = Array.from(document.querySelectorAll('p')).some(node => node.textContent.includes('Scratchtree uses a protected key'));
+        window.__noticeBeforeOpen = Array.from(document.querySelectorAll('p')).some(node => node.textContent.includes('Scratchtree WebCrypto Master Key'));
         await new Promise(resolve => { window.__releaseStartup = resolve; });
         return originalOpen(options);
       };
@@ -314,11 +317,11 @@ test('slow native startup explains system permission without taking newer focus'
     });
   });
   await page.goto('/');
-  const opening = page.getByRole('region', { name: 'Opening notes' });
-  await expect(opening.getByRole('status')).toHaveText('Opening your notes…');
-  await expect(
-    opening.getByText(/Scratchtree uses a protected key/),
-  ).toBeVisible();
+  const opening = page.getByRole('main', { name: 'Opening your notes…' });
+  await expect(opening.getByRole('status')).toContainText(
+    'Opening your notes…',
+  );
+  await expect(opening.getByText(/If macOS asks for access/)).toBeVisible();
   expect(await page.evaluate(() => (window as any).__noticeBeforeOpen)).toBe(
     true,
   );
@@ -336,7 +339,7 @@ test('slow native startup explains system permission without taking newer focus'
   ).toBeFocused();
 });
 
-test('startup Retry reuses a slow opening and late success opens notes without restarting', async ({
+test('a long pending startup stays in progress and opens notes automatically', async ({
   page,
 }) => {
   await page.clock.install();
@@ -361,23 +364,24 @@ test('startup Retry reuses a slow opening and late success opens notes without r
   await expect
     .poll(() => page.evaluate(() => typeof (window as any).__releaseStartup))
     .toBe('function');
-  await page.clock.fastForward(11000);
+  await page.clock.fastForward(22000);
+  await expect(page.getByRole('button')).toHaveCount(0);
   await expect(
-    page.getByRole('heading', { name: 'Notes are still opening' }),
+    page.getByRole('heading', { name: 'Opening your notes…' }),
   ).toBeVisible();
-  const retry = page.getByRole('button', { name: 'Retry opening notes' });
-  await retry.click();
-  await expect(retry).toBeDisabled();
+  await expect(page.getByText('Scratchtree WebCrypto Master Key')).toHaveCount(
+    0,
+  );
+  const retry = page.getByRole('button', { name: 'Try again' });
   expect(await page.evaluate(() => (window as any).__startupAttempts)).toBe(1);
-  await page.clock.fastForward(11000);
-  await expect(retry).toBeEnabled();
   await page.evaluate(() => (window as any).__releaseStartup());
   await expect(composer(page)).toBeVisible();
   expect(await page.evaluate(() => (window as any).__startupAttempts)).toBe(1);
   await expect(retry).toHaveCount(0);
 });
 
-test('five-second startup recovery opens separate persistent local notes and fences late startup', async ({
+test('a startup failure offers separate persistent local notes as a secondary action', async ({
+  browserName,
   page,
 }) => {
   await page.clock.install();
@@ -394,38 +398,68 @@ test('five-second startup recovery opens separate persistent local notes and fen
         (await response.text()) +
         `
       const originalOpen = PersistentSession.open.bind(PersistentSession);
-      window.__startupLateClosed = false;
+      let firstRecoveryAttempt = true;
       PersistentSession.open = async options => {
-        if (options.useLocalRecovery || sessionStorage.getItem('synthetic-recovery-started')) { sessionStorage.setItem('synthetic-recovery-started', '1'); return originalOpen(options); }
-        await new Promise(resolve => { window.__releasePreviousStartup = resolve; });
-        return { close() { window.__startupLateClosed = true; } };
+        if (options.useLocalRecovery && firstRecoveryAttempt) {
+          firstRecoveryAttempt = false;
+          return new Promise((_, reject) => {
+            window.__failLocalRecovery = () => reject(new Error('Synthetic local recovery failure'));
+          });
+        }
+        if (options.useLocalRecovery || sessionStorage.getItem('synthetic-recovery-started')) {
+          sessionStorage.setItem('synthetic-recovery-started', '1');
+          return originalOpen(options);
+        }
+        return new Promise((_, reject) => {
+          window.__failStartup = () => reject(new Error('Synthetic startup failure'));
+        });
       };
     `,
     });
   });
   await page.goto('/');
   await expect
-    .poll(() =>
-      page.evaluate(() => typeof (window as any).__releasePreviousStartup),
-    )
+    .poll(() => page.evaluate(() => typeof (window as any).__failStartup))
     .toBe('function');
+  await page.clock.fastForward(11000);
   const local = page.getByRole('button', { name: 'Use separate local notes' });
-  await page.clock.fastForward(5000);
-  await expect(local).toBeEnabled();
+  await expect(local).toHaveCount(0);
+  await page.evaluate(() => (window as any).__failStartup());
   await expect(
-    page.getByText(/Synced notes stay in\s+their existing cache/),
+    page.getByRole('heading', { name: 'Couldn’t open your notes' }),
   ).toBeVisible();
-  await local.click();
+  await expect(
+    page.getByText('Scratchtree kept your existing library in place.'),
+  ).toBeVisible();
+  await expect(page.getByRole('separator')).toBeVisible();
+  await expect(
+    page.getByText('Scratchtree will remember this choice for future launches'),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 320, height: 280 });
+  await page.locator('html').evaluate((html) => {
+    html.style.fontSize = '24px';
+  });
+  const retry = page.getByRole('button', { name: 'Try again' });
+  await retry.focus();
+  // WebKit uses Option-Tab to include buttons in sequential keyboard navigation.
+  await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
+  await expect(local).toBeFocused();
+  await expect(local).toBeInViewport();
+  await local.press('Enter');
+  await expect(local).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => typeof (window as any).__failLocalRecovery))
+    .toBe('function');
+  await page.evaluate(() => (window as any).__failLocalRecovery());
+  await expect(local).toBeFocused();
+  await local.press('Enter');
+  await page.setViewportSize({ width: 800, height: 600 });
+  await page.locator('html').evaluate((html) => {
+    html.style.removeProperty('font-size');
+  });
   await expect(composer(page)).toBeVisible();
   await composer(page).fill('Recovery library stays local');
   await composer(page).press('Enter');
-  await expect(page.getByRole('article', { name: 'Saved note' })).toContainText(
-    'Recovery library stays local',
-  );
-  await page.evaluate(() => (window as any).__releasePreviousStartup());
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__startupLateClosed))
-    .toBe(true);
   await expect(page.getByRole('article', { name: 'Saved note' })).toContainText(
     'Recovery library stays local',
   );

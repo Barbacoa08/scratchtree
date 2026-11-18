@@ -397,7 +397,7 @@ export class PersistentSession {
     const opening = this.opening;
     if (opening.automaticSync !== automaticSync) throw inactive();
     opening.abandoned = false;
-    // Startup's route owns the bounded wait and can rejoin its same promise.
+    // Startup waits for the cache to settle. Route disposal aborts the Session open.
     if (mode === 'startup') await opening.ready;
     else {
       try {
