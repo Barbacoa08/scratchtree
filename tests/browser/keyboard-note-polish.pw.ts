@@ -190,34 +190,73 @@ test('code copy reports success and failure in workspace status without changing
   expect(await state(page)).toEqual(before);
 });
 
-test('move search starts focused, Enter is neutral, and Tab enables filtered list navigation', async ({
-  page,
-}) => {
-  const ids = await seed(page, ['source', 'alpha', 'beta']);
-  await page.evaluate(async (ids) => {
-    const t = (window as any).__test;
-    for (const id of ids.slice(1)) await t.repo.promoteItem(id);
-    await t.controller.start();
-  }, ids);
-  await card(page, ids[0]).click();
-  await page.keyboard.press('m');
-  const dialog = page.getByRole('dialog', { name: 'Move notes' });
-  const search = dialog.getByRole('searchbox', { name: 'Search destinations' });
-  await expect(search).toBeFocused();
-  await search.fill('BETA');
-  await expect(dialog.getByRole('option')).toHaveCount(1);
-  const before = await state(page);
-  await search.press('Enter');
-  expect(await state(page)).toEqual(before);
-  await expect(dialog).toBeVisible();
-  await search.press('Tab');
-  await expect(dialog.getByRole('listbox')).toBeFocused();
-  await page.keyboard.press('Enter');
-  await expect(dialog).toHaveCount(0);
-  expect(
-    (await state(page)).items.find((x: any) => x.id === ids[0]).parentId,
-  ).toBe(ids[2]);
-});
+for (const focus of ['search', 'results']) {
+  test(
+    'move search preserves literal queries and confirms from ' + focus,
+    async ({ page }) => {
+      const ids = await seed(page, ['source', 'alpha', 'beta']);
+      await page.evaluate(async (ids) => {
+        const t = (window as any).__test;
+        for (const id of ids.slice(1)) await t.repo.promoteItem(id);
+        await t.controller.start();
+      }, ids);
+      await card(page, ids[0]).click();
+      await page.keyboard.press('m');
+      const dialog = page.getByRole('dialog', { name: 'Move notes' });
+      const search = dialog.getByRole('searchbox', {
+        name: 'Search destinations',
+      });
+      await expect(search).toBeFocused();
+      await search.fill('no such destination');
+      await search.press('ArrowDown');
+      await search.press('Enter');
+      await expect(search).toBeFocused();
+      const list = dialog.getByRole('listbox');
+      await search.fill('');
+      await search.press('Tab');
+      await list.press('End');
+      await list.press('Shift+Tab');
+      await search.press('ArrowDown');
+      await expect(list).toBeFocused();
+      await expect(list.getByRole('option').first()).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      await list.press('ArrowUp');
+      await expect(search).toBeFocused();
+      await search.fill('BETA');
+      await expect(dialog.getByRole('option')).toHaveCount(1);
+      const before = await state(page);
+      await search.press('ArrowDown');
+      await expect(list).toBeFocused();
+      await expect(list.getByRole('option')).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      await list.press('ArrowUp');
+      await expect(search).toBeFocused();
+      await expect(search).toHaveValue('BETA');
+      await expect(search).toHaveAttribute('autocorrect', 'off');
+      await expect(search).toHaveAttribute('autocapitalize', 'none');
+      await expect(search).toHaveAttribute('spellcheck', 'false');
+      await search.press('Tab');
+      await expect(list).toBeFocused();
+      await list.press('Shift+Tab');
+      await expect(search).toBeFocused();
+      await search.dispatchEvent('keydown', {
+        key: 'Enter',
+        isComposing: true,
+      });
+      expect(await state(page)).toEqual(before);
+      if (focus === 'results') await search.press('ArrowDown');
+      await page.keyboard.press('Enter');
+      await expect(dialog).toHaveCount(0);
+      expect(
+        (await state(page)).items.find((x: any) => x.id === ids[0]).parentId,
+      ).toBe(ids[2]);
+    },
+  );
+}
 
 test('six rendered lines collapse to one line and expand to show the rest', async ({
   page,

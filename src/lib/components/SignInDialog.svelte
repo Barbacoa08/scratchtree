@@ -191,7 +191,7 @@
         {value.pendingRecovery
           ? 'Sync is still pending. You can close this dialog to return to your notes. The submitted change may still finish.'
           : value.join
-            ? 'Applying synced notes. Please wait.'
+            ? 'Merging notes. Please wait.'
             : 'Signed in. Initial sync is pending.'}
       </p>{/if}
     {#if value.phase === 'sending-code'}<p role="status">
@@ -202,7 +202,10 @@
         This Mac has {value.join.localNotes} notes. Synced notes: {value.join
           .cloudNotes}.
       </p>
-      <p>This Mac’s notes will be kept in recovery.</p>
+      <p>
+        Both sets of notes will sync to your account. If a note is in both sets,
+        the most recently changed version is kept.
+      </p>
     {/if}
     <div class="auth-actions">
       {#if value.canCancel}<button type="button" onclick={dismiss}>Close</button
@@ -211,10 +214,10 @@
         <button
           type="button"
           bind:this={joinButton}
-          disabled={!auth.acceptCloud ||
+          disabled={!auth.mergeNotes ||
             !value.canCancel ||
             value.pendingRecovery}
-          onclick={() => void auth.acceptCloud?.()}>Use synced notes</button
+          onclick={() => void auth.mergeNotes?.()}>Merge notes</button
         >
       {:else if value.phase === 'syncing' && value.error}<button
           type="button"

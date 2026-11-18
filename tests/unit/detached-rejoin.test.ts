@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { planRejoin } from '../../src/lib/sync/rejoin';
-import type { Item } from '../../src/lib/domain/notes';
+import { planRejoin, reconcileTransfer } from '../../src/lib/sync/rejoin';
+import { MAX_SOURCE, type Item } from '../../src/lib/domain/notes';
+import { encodeCloudBackup } from '../../src/lib/sync/backup';
+import type { Transfer } from '../../src/lib/sync/detached';
 import type { PendingIntent } from '../../src/lib/sync/intents';
 const id = '00000000-0000-4000-8000-000000000001';
 const item: Item = {
@@ -189,4 +191,90 @@ it('does not attach a child or metadata to a conflicting same-ID remote creation
   const result = planRejoin(lib(), local, lib(existing), [a, b]);
   expect(result.library.items).toEqual([existing]);
   expect(result.conflicts.map((p) => p.id)).toEqual([a.id, b.id]);
+});
+
+describe('first sign-in merge', () => {
+  const account = 'a'.repeat(64);
+  const childId = '00000000-0000-4000-8000-000000000002';
+
+  function transfer(epoch: string, items: Item[]): Transfer {
+    const backup: Transfer['backup'] = {
+      format: 'scratchtree',
+      version: 8,
+      exportedAt: new Date(0).toISOString(),
+      library: lib(...items),
+      device: { drafts: [], undoDeleteIds: [], recovery: [] },
+    };
+    encodeCloudBackup(backup);
+    return {
+      epoch,
+      backup,
+      purges: [],
+      archived: [],
+      pending: [],
+      journal: { sequence: 0, sources: [] },
+    };
+  }
+
+  it('rejects a cycle assembled from two valid trees without changing either tree', () => {
+    const local = transfer('local', [
+      { ...item, parentId: childId, updatedAt: 4 },
+      { ...item, id: childId, kind: 'tree' },
+    ]);
+    const synced = transfer('synced', [
+      { ...item, kind: 'tree' },
+      { ...item, id: childId, parentId: id, updatedAt: 5 },
+    ]);
+    const before = structuredClone([local, synced]);
+
+    expect(() => reconcileTransfer(local, synced, null, account)).toThrow(
+      /note hierarchies conflict/,
+    );
+    expect([local, synced]).toEqual(before);
+  });
+
+  it('keeps an independently deleted child in Trash when a newer parent is restored', () => {
+    const local = transfer('local', [
+      { ...item, kind: 'tree', deletedAt: 3, restoreIndex: 0, updatedAt: 3 },
+      {
+        ...item,
+        id: childId,
+        parentId: id,
+        deletedAt: 4,
+        restoreParentId: id,
+        restoreIndex: 0,
+        updatedAt: 4,
+      },
+    ]);
+    const synced = transfer('synced', [
+      { ...item, kind: 'tree', updatedAt: 5 },
+    ]);
+    local.backup.device.undoDeleteIds = [childId];
+
+    const result = reconcileTransfer(local, synced, null, account).transfer;
+    expect(result.backup.library.items).toEqual([
+      { ...item, kind: 'tree', updatedAt: 5 },
+      { ...local.backup.library.items[1], parentId: null },
+    ]);
+    expect(result.backup.device.undoDeleteIds).toEqual([childId]);
+  });
+
+  it('rejects the combined envelope when two valid libraries exceed its capacity', () => {
+    const markdown = 'x'.repeat(MAX_SOURCE);
+    const notes = () =>
+      Array.from({ length: 6 }, (_, position) => ({
+        ...item,
+        id: crypto.randomUUID(),
+        markdown,
+        position,
+      }));
+    const local = transfer('local', notes());
+    const synced = transfer('synced', notes());
+    const before = structuredClone([local, synced]);
+
+    expect(() => reconcileTransfer(local, synced, null, account)).toThrow(
+      /10 MiB capacity/,
+    );
+    expect([local, synced]).toEqual(before);
+  });
 });

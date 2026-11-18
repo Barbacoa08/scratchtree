@@ -57,7 +57,7 @@ function setup() {
       if (failFinish) throw new Error('Offline');
       return join;
     },
-    acceptCloud: async () => {
+    mergeNotes: async () => {
       join = null;
     },
     signOut: async () => {
@@ -303,19 +303,19 @@ describe('public Dexie login flow', () => {
     release();
     await retry;
     let adopted = 0;
-    f.host.acceptCloud = () => {
+    f.host.mergeNotes = () => {
       adopted++;
       return new Promise((resolve) => {
         release = () => resolve();
       });
     };
-    const adoption = f.auth.acceptCloud();
+    const adoption = f.auth.mergeNotes();
     await vi.advanceTimersByTimeAsync(5000);
     expect(f.auth.state).toMatchObject({
       canCancel: true,
       pendingRecovery: true,
     });
-    await f.auth.acceptCloud();
+    await f.auth.mergeNotes();
     expect(adopted).toBe(1);
     f.auth.dismiss();
     release();
@@ -482,7 +482,7 @@ describe('public Dexie login flow', () => {
       phase: 'syncing',
       join: { localNotes: 2, cloudNotes: 3 },
     });
-    await f.auth.acceptCloud();
+    await f.auth.mergeNotes();
     expect(f.auth.state).toMatchObject({
       phase: 'signed-in',
       open: false,
@@ -544,7 +544,7 @@ describe('public Dexie login flow', () => {
       },
       cancelSignIn: async () => {},
       finishSignIn: async () => null,
-      acceptCloud: async () => {},
+      mergeNotes: async () => {},
       signOut: async () => {
         throw Error('Storage full');
       },

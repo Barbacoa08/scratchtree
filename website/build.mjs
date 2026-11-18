@@ -40,6 +40,7 @@ const slots = new Map([
   ['icp4', 16],
   ['icp5', 32],
   ['ic12', 64],
+  ['ic09', 512],
 ]);
 for (let offset = 8; offset < icns.length;) {
   if (offset + 8 > icns.length) throw new Error('Truncated icon entry.');

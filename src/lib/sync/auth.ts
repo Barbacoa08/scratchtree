@@ -19,7 +19,7 @@ export interface AuthHost {
   prepareSignIn(): Promise<CloudLogin>;
   cancelSignIn(): Promise<void>;
   finishSignIn(): Promise<Join | null>;
-  acceptCloud(): Promise<void | Join | null>;
+  mergeNotes(): Promise<void | Join | null>;
   signOut(): Promise<void>;
 }
 type Attempt = {
@@ -351,13 +351,13 @@ export class CloudAuthController implements AuthPort {
     this.patch({ error: null });
     await this.finish(this.attempt);
   }
-  async acceptCloud() {
+  async mergeNotes() {
     if (!this.state.join || this.finishing) return;
     this.finishing = true;
     this.beginRecoveryWait(this.attempt);
     this.patch({ error: null });
     try {
-      const changed = await this.host.acceptCloud();
+      const changed = await this.host.mergeNotes();
       if (changed) {
         this.patch({
           join: changed,
