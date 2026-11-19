@@ -6,7 +6,7 @@ import type {
   CreateChildTree,
   DraftAck,
   MoveItems,
-  PurgeItem,
+  PurgeRequest,
   ReorderItem,
   TransitionLocation,
   UndoDeleteRequest,
@@ -20,12 +20,13 @@ export type IntentCommand =
   | { kind: 'createChildTree'; request: CreateChildTree }
   | { kind: 'promoteItem'; id: string }
   | { kind: 'deleteItem'; id: string; leave?: Location }
-  | { kind: 'purgeItem'; request: PurgeItem }
+  | { kind: 'purgeItem'; request: PurgeRequest }
   | { kind: 'transitionLocation'; request: TransitionLocation }
   | { kind: 'moveItems'; request: MoveItems }
   | { kind: 'restoreItem'; id: string }
   | { kind: 'undoDelete'; request: UndoDeleteRequest }
   | { kind: 'setItemDone'; id: string; done: boolean }
+  | { kind: 'setItemsDone'; ids: string[]; done: boolean }
   | { kind: 'setItemColor'; id: string; color: ColorToken | null }
   | { kind: 'reorderItem'; request: ReorderItem }
   | {

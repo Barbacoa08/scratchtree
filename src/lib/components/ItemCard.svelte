@@ -91,6 +91,9 @@
   let body = $state<NoteBody>();
   let lineCenter = $state<number>();
   let updated = $derived(timestampPresentation(item.updatedAt));
+  export function toggleExpanded() {
+    return body?.toggleExpanded() ?? false;
+  }
   export function focus(options?: { end?: boolean }) {
     body?.focus(options);
   }

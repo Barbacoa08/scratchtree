@@ -21,6 +21,8 @@ let syncState: SyncState = {
 };
 const authListeners = new Set<(state: AuthState) => void>();
 let failRecovery = false;
+let recoveryDelay: Promise<void> | undefined;
+let finishRecovery: (() => void) | undefined;
 let failSignOut = false;
 let signOutAttempts = 0;
 let replaceAfterPurge = false;
@@ -110,6 +112,7 @@ export const sync: SyncPort = {
     setSync({ state: 'syncing' });
   },
   async exportRecovery() {
+    await recoveryDelay;
     if (failRecovery) throw new Error('Synthetic export failure');
     setSync({ detail: 'Recovery export requested.' });
   },
@@ -154,6 +157,16 @@ export function install() {
       },
       failRecovery(value: boolean) {
         failRecovery = value;
+      },
+      delayRecovery() {
+        recoveryDelay = new Promise<void>(
+          (resolve) => (finishRecovery = resolve),
+        );
+      },
+      finishRecovery() {
+        finishRecovery?.();
+        recoveryDelay = undefined;
+        finishRecovery = undefined;
       },
     },
   });

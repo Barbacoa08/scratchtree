@@ -1,5 +1,6 @@
 import { backupFixture } from '../fixtures/backup';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import type { MoveItems } from '../../src/lib/platform/workspace';
 import { MemoryRepository } from '../fixtures/memory';
 import { encodeBackup, validateBackup } from '../fixtures/backup';
 import { restoreItem } from '../../src/lib/domain/items';
@@ -619,6 +620,131 @@ it('queued Command-N captures its actual exit origin after prior navigation ACK 
   );
   expect(c.state.location).toEqual({ scope: 'live', itemId: calls[0].id });
   c.dispose();
+});
+
+it('a repeated group Delete uses the exact failed structural intent and ordered Undo', async () => {
+  const r = new MemoryRepository();
+  r.snapshot = {
+    items: [item(1, null, 'note', 0), item(2, null, 'note', 1)],
+    drafts: [],
+    undoDeleteIds: [],
+  };
+  const c = new WorkspaceController(r);
+  await c.start();
+  const move = r.moveItems.bind(r);
+  const calls: MoveItems[] = [];
+  r.moveItems = async (request) => {
+    calls.push(structuredClone(request));
+    if (calls.length === 1) throw new Error('synthetic shared-write failure');
+    return move(request);
+  };
+  const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    expect(await c.removeGroup([id(1), id(2)])).toBe(false);
+    now.mockReturnValue(6000);
+    expect(await c.removeGroup([id(2), id(1)])).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(calls[0]);
+    expect(r.snapshot.undoDeleteIds).toEqual([id(1), id(2)]);
+  } finally {
+    now.mockRestore();
+    c.dispose();
+  }
+});
+
+it('a stale group Delete retry allows a fresh explicit deletion after the group changes', async () => {
+  const r = new MemoryRepository();
+  r.snapshot = {
+    items: [item(1, null, 'note', 0), item(2, null, 'note', 1)],
+    drafts: [],
+    undoDeleteIds: [],
+  };
+  const c = new WorkspaceController(r);
+  await c.start();
+  try {
+    r.fail = 'move';
+    expect(await c.removeGroup([id(1), id(2)])).toBe(false);
+    r.fail = null;
+    r.snapshot.items.push(item(3, null, 'note', 2));
+    await c.start();
+    expect(await c.retryMutation()).toBe(false);
+    expect(c.state.error).toContain('selection changed');
+    expect(c.state.mutationRetry).toBe(false);
+    expect(r.snapshot.items.every((entry) => entry.deletedAt === null)).toBe(
+      true,
+    );
+    expect(await c.removeGroup([id(1), id(2)])).toBe(true);
+    expect(r.snapshot.undoDeleteIds).toEqual([id(1), id(2)]);
+  } finally {
+    c.dispose();
+  }
+});
+
+it('an uncertain group purge fences overlapping requests and releases Retry after an independent change', async () => {
+  const r = new MemoryRepository();
+  r.snapshot = {
+    items: [
+      { ...item(1, null, 'note', 0), deletedAt: 3 },
+      { ...item(2, null, 'note', 1), deletedAt: 4 },
+      item(3, null, 'note', 0),
+    ],
+    drafts: [],
+    undoDeleteIds: [],
+  };
+  const c = new WorkspaceController(r);
+  await c.start();
+  try {
+    const group = c.capturePurgeGroup([id(1), id(2)]);
+    const one = c.capturePurge(id(1));
+    r.fail = 'purge';
+    expect(await c.purgeItem(group)).toBe(false);
+    const failedGroup = c.mutationRetryIdentity;
+    r.fail = null;
+    expect(await c.purgeItem(one)).toBe(false);
+    expect(r.snapshot.items).toHaveLength(3);
+    await r.purgeItem(one);
+    r.fail = 'color';
+    expect(await c.setItemColor(id(3), 'red')).toBe(false);
+    const colorRetry = c.commandRetryIdentity;
+    expect(c.mutationRetryIdentity).toBe(failedGroup);
+    r.fail = null;
+    expect(await c.retryMutation()).toBe(false);
+    expect(c.mutationRetryIdentity).toBe(colorRetry);
+    expect(await c.retryMutation()).toBe(true);
+    expect(r.snapshot.items.map((x) => [x.id, x.color])).toEqual([
+      [id(2), 'purple'],
+      [id(3), 'red'],
+    ]);
+  } finally {
+    c.dispose();
+  }
+});
+
+it('an escaped descendant prevents neutral acknowledgment of a group purge with absent roots', async () => {
+  const r = new MemoryRepository();
+  r.snapshot = {
+    items: [
+      { ...item(1, null, 'tree', 0), deletedAt: 3 },
+      { ...item(2, null, 'note', 1), deletedAt: 4 },
+      item(3, 1, 'note', 0),
+    ],
+    drafts: [],
+    undoDeleteIds: [],
+  };
+  const c = new WorkspaceController(r);
+  await c.start();
+  try {
+    r.fail = 'purge';
+    expect(await c.purgeItem(c.capturePurgeGroup([id(1), id(2)]))).toBe(false);
+    r.fail = null;
+    r.snapshot.items = [{ ...item(3, null, 'note', 0), deletedAt: 5 }];
+    expect(await c.retryMutation()).toBe(false);
+    expect(c.state.mutationRetry).toBe(false);
+    expect(r.snapshot.items.map((entry) => entry.id)).toEqual([id(3)]);
+    expect(c.state.purgedItemIds).toEqual([]);
+  } finally {
+    c.dispose();
+  }
 });
 
 for (const nextAction of ['Delete', 'Home', 'Home-clean'] as const)

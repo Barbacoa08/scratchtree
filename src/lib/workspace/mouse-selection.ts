@@ -1,4 +1,4 @@
-/** Mouse-only sibling selection. Editor ownership is deliberately independent. */
+/** Sibling selection. Editor ownership is deliberately independent. */
 export type MouseSelection = {
   ids: string[];
   primary: string;
@@ -62,6 +62,27 @@ export function reconcileMouseSelection(
     ids,
     primary: ids.includes(state.primary) ? state.primary : ids.at(-1)!,
     anchor: displayed.includes(state.anchor) ? state.anchor : '',
+  };
+}
+
+/** Grow the selected edge without discarding the opposite edge or Command-click gaps. */
+export function extendSelection(
+  state: MouseSelection,
+  displayed: readonly string[],
+  direction: -1 | 1,
+): MouseSelection {
+  const current = reconcileMouseSelection(state, displayed);
+  const edge = direction < 0 ? current.ids[0] : current.ids.at(-1);
+  if (!edge) {
+    const id = displayed[0];
+    return id ? { ids: [id], primary: id, anchor: id } : state;
+  }
+  const id = displayed[displayed.indexOf(edge) + direction];
+  if (!id) return state;
+  return {
+    ids: direction < 0 ? [id, ...current.ids] : [...current.ids, id],
+    primary: id,
+    anchor: current.anchor,
   };
 }
 

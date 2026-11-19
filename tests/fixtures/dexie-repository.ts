@@ -86,6 +86,57 @@ export async function run(scenario: string) {
         (await db.pending.count()) === 1 && (await db.witnesses.count()) === 1,
         'durable pending and witness',
       );
+    } else if (scenario === 'group-mutations') {
+      await capture(1);
+      await capture(2);
+      await capture(3);
+      await rejects(() => repo.setItemsDone([id(1), id(4)], true));
+      assert(
+        !(await repo.loadWorkspace()).items.some((item) => item.done),
+        'a missing completion target leaves all siblings unchanged',
+      );
+      const completed = await repo.setItemsDone([id(1), id(2)], true);
+      assert(
+        completed.items.filter((item) => item.done).length === 2,
+        'exact completion group acknowledged',
+      );
+      await repo.createChildTree({
+        id: id(4),
+        parent: { scope: 'live', itemId: id(1) },
+      });
+      await repo.deleteItem(id(1));
+      await repo.deleteItem(id(2));
+      const request = {
+        ids: [id(1), id(2)],
+        location: trash,
+        expectedSubtreeIds: [id(1), id(2), id(4)],
+      };
+      await rejects(() =>
+        repo.purgeItem({ ...request, expectedSubtreeIds: request.ids }),
+      );
+      assert(
+        (await repo.loadWorkspace()).items.length === 4,
+        'stale purge changes nothing',
+      );
+      await repo.restoreItem(id(2));
+      await rejects(() => repo.purgeItem(request));
+      assert(
+        (await repo.loadWorkspace()).items.length === 4,
+        'live member blocks the whole purge',
+      );
+      await repo.deleteItem(id(2));
+      const result = await repo.purgeItem(request);
+      assert(
+        result.removedIds.join() === request.expectedSubtreeIds.join() &&
+          result.workspace.items[0]?.id === id(3) &&
+          result.workspace.items.length === 1,
+        'purge removes exactly the selected roots and their descendants',
+      );
+      const replay = await repo.purgeItem(request);
+      assert(
+        replay.removedIds.join() === result.removedIds.join(),
+        'exact replay acknowledges the group',
+      );
     } else if (scenario === 'commands') {
       await capture(1);
       await capture(2);

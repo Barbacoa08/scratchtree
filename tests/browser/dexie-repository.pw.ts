@@ -16,6 +16,7 @@ const fixture = ts.transpileModule(
 const cases = [
   'durability',
   'commands',
+  'group-mutations',
   'drafts',
   'structure',
   'trash',

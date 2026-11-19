@@ -93,7 +93,7 @@ test('Command toggles membership while only the primary exposes single-item acti
   await page.keyboard.press('ArrowDown');
   await expect.poll(() => selected(page)).toEqual([ids[4]]);
   await page.keyboard.press('Shift+ArrowUp');
-  await expect.poll(() => selected(page)).toEqual([ids[4]]);
+  await expect.poll(() => selected(page)).toEqual(ids.slice(3));
 });
 
 test('search selection stays one exact result and editing retains its text selection', async ({
@@ -261,4 +261,47 @@ test('an all-sibling selection has neutral keyboard boundaries and no unavailabl
   expect(
     await page.evaluate(() => (window as any).__test.repo.snapshot),
   ).toEqual(before);
+});
+
+test('Shift arrows grow either edge and X and Delete act on the whole selection', async ({
+  page,
+}) => {
+  const ids = await seed(page);
+  await card(page, ids[2]).click();
+  await page.keyboard.press('x');
+  await expect(card(page, ids[2])).toHaveClass(/done/);
+  await page.keyboard.press('Shift+ArrowDown');
+  await expect.poll(() => selected(page)).toEqual(ids.slice(2, 4));
+  await page.keyboard.press('Shift+ArrowUp');
+  await expect.poll(() => selected(page)).toEqual(ids.slice(1, 4));
+  await page.keyboard.press('x');
+  await expect(page.locator('.note-card.done')).toHaveCount(3);
+  await page.keyboard.press('x');
+  await expect(page.locator('.note-card.done')).toHaveCount(0);
+  await page.keyboard.press('Meta+Backspace');
+  await expect.poll(() => selected(page)).toEqual([ids[4]]);
+  await expect(page.locator('.note-card')).toHaveCount(2);
+  await page.keyboard.press('Meta+z');
+  await expect(page.locator('.note-card')).toHaveCount(5);
+  await expect(card(page, ids[1])).toHaveAttribute('data-kind', 'tree');
+});
+
+test('Delete permanently removes selected Trash siblings and retains unrelated roots', async ({
+  page,
+}) => {
+  const ids = await seed(page);
+  await page.evaluate(async (ids) => {
+    const t = (window as any).__test;
+    for (const id of ids.slice(1, 4)) await t.repo.deleteItem(id);
+    await t.controller.start();
+  }, ids);
+  await page.getByRole('button', { name: 'Trash', exact: true }).click();
+  await card(page, ids[1]).click();
+  await card(page, ids[3]).click({ modifiers: ['Meta'] });
+  await page.keyboard.press('Meta+Backspace');
+  await expect(page.locator('.note-card')).toHaveCount(1);
+  await expect(card(page, ids[2])).toBeVisible();
+  const marks = await page.evaluate(() => (window as any).__test.repo.snapshot);
+  expect(marks.items).toHaveLength(3);
+  expect(marks.undoDeleteIds).toEqual([]);
 });

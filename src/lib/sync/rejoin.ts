@@ -51,14 +51,23 @@ function capturedAfter(before: Library, p: PendingIntent): Library {
   ].sort();
   return result;
 }
-const fieldOf = (p: PendingIntent) =>
-  p.command.kind === 'saveItemSource'
-    ? 'markdown'
-    : p.command.kind === 'setItemDone'
-      ? 'done'
-      : p.command.kind === 'setItemColor'
-        ? 'color'
-        : null;
+function fieldEdit(command: PendingIntent['command']): {
+  field: 'markdown' | 'done' | 'color';
+  ids: string[];
+} | null {
+  switch (command.kind) {
+    case 'saveItemSource':
+      return { field: 'markdown', ids: [command.id] };
+    case 'setItemDone':
+      return { field: 'done', ids: [command.id] };
+    case 'setItemsDone':
+      return { field: 'done', ids: command.ids };
+    case 'setItemColor':
+      return { field: 'color', ids: [command.id] };
+    default:
+      return null;
+  }
+}
 /** Replay immutable outcomes in journal order. Use only the final detached edit to each field. */
 export function planRejoin(
   base: Library,
@@ -73,11 +82,13 @@ export function planRejoin(
     ordered = orderedIntents(journal);
   const latest = new Map<string, PendingIntent>(),
     origins = new Map(base.items.map((i) => [i.id, i])),
+    localItems = new Map(local.items.map((i) => [i.id, i])),
     denied = new Set<string>();
   for (const p of ordered) {
-    const field = fieldOf(p);
-    if (field && 'id' in p.command) latest.set(p.command.id + field, p);
+    const edit = fieldEdit(p.command);
+    if (edit) for (const id of edit.ids) latest.set(id + edit.field, p);
   }
+  let targets = new Map(library.items.map((item) => [item.id, item]));
   for (const p of ordered) {
     if (
       !p.localApplied ||
@@ -89,34 +100,75 @@ export function planRejoin(
     }
     const before = cursor;
     cursor = capturedAfter(cursor, p);
-    const command = p.command,
-      field = fieldOf(p);
-    if (field && 'id' in command) {
-      if (denied.has(command.id)) {
+    const command = p.command;
+    const edit = fieldEdit(command);
+    if (edit) {
+      const { field, ids } = edit;
+      if (ids.some((id) => denied.has(id))) {
         conflicts.push(p);
         continue;
       }
-      if (latest.get(command.id + field) !== p) continue;
-      const baseline = origins.get(command.id),
-        target = library.items.find((i) => i.id === command.id),
-        final = local.items.find((i) => i.id === command.id);
-      if (
-        !final ||
-        (baseline && baseline[field] === final[field]) ||
-        (target && target[field] === final[field])
-      )
-        continue;
-      if (!baseline || !target || target[field] !== baseline[field]) {
+      const edits: { target: Item; final: Item }[] = [];
+      let conflict = false;
+      for (const id of ids) {
+        if (latest.get(id + field) !== p) continue;
+        const baseline = origins.get(id);
+        const target = targets.get(id);
+        const final = localItems.get(id);
+        if (
+          !final ||
+          (baseline && baseline[field] === final[field]) ||
+          (target && target[field] === final[field])
+        )
+          continue;
+        if (!baseline || !target || target[field] !== baseline[field]) {
+          conflict = true;
+          break;
+        }
+        edits.push({ target, final });
+      }
+      if (conflict) {
         conflicts.push(p);
         continue;
       }
-      Object.assign(target, { [field]: final[field] });
-      const outcome = p.expected.items.find((i) => i.id === target.id);
-      if (outcome?.kind === 'update' && outcome.fields.updatedAt)
-        target.updatedAt = Math.max(
-          target.updatedAt,
-          outcome.fields.updatedAt.after,
-        );
+      if (!edits.length) {
+        if (
+          command.kind === 'setItemsDone' &&
+          ids.some(
+            (id) =>
+              latest.get(id + field) === p &&
+              localItems.get(id)?.done === command.done &&
+              targets.get(id)?.done !== command.done,
+          )
+        )
+          conflicts.push(p);
+        continue;
+      }
+      if (command.kind === 'setItemsDone') {
+        const applying = new Set(edits.map(({ target }) => target.id));
+        // The original witness covers every captured member, including no-ops.
+        // Retain the detached group for recovery if replay cannot prove it whole.
+        if (
+          ids.some(
+            (id) =>
+              localItems.get(id)?.done !== command.done ||
+              (!applying.has(id) && targets.get(id)?.done !== command.done),
+          )
+        ) {
+          conflicts.push(p);
+          continue;
+        }
+      }
+      const outcomes = new Map(p.expected.items.map((item) => [item.id, item]));
+      for (const { target, final } of edits) {
+        Object.assign(target, { [field]: final[field] });
+        const outcome = outcomes.get(target.id);
+        if (outcome?.kind === 'update' && outcome.fields.updatedAt)
+          target.updatedAt = Math.max(
+            target.updatedAt,
+            outcome.fields.updatedAt.after,
+          );
+      }
       admitted.push(p);
       continue;
     }
@@ -180,6 +232,7 @@ export function planRejoin(
         continue;
       }
       library = next;
+      targets = new Map(library.items.map((item) => [item.id, item]));
       admitted.push(p);
       continue;
     }
@@ -204,6 +257,7 @@ export function planRejoin(
       continue;
     }
     library = capturedAfter(library, p);
+    targets = new Map(library.items.map((item) => [item.id, item]));
     admitted.push(p);
   }
   return { library, admitted, conflicts };
