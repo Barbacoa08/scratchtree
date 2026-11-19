@@ -261,11 +261,14 @@ export class WorkspaceController {
           s = newer.workspace;
         }
         if (this.disposed) return false;
-        const ids = new Set(s.items.map((x) => x.id));
+        const itemsById = new Map(s.items.map((item) => [item.id, item]));
+        const draftsByKey = new Map(
+          s.drafts.map((draft) => [draft.key, draft]),
+        );
         const removed = refresh?.replaced
           ? prior.items.map((x) => x.id)
           : (refresh?.removedIds ??
-            prior.items.filter((x) => !ids.has(x.id)).map((x) => x.id));
+            prior.items.filter((x) => !itemsById.has(x.id)).map((x) => x.id));
         const gone = (key: string) =>
           removed.includes(key) ||
           (key.startsWith('compose:') && removed.includes(key.slice(8)));
@@ -275,8 +278,8 @@ export class WorkspaceController {
             delete buffers[key];
             this.dirty.delete(key);
           } else if (!this.dirty.has(key)) {
-            const item = s.items.find((x) => x.id === key),
-              draft = s.drafts.find((x) => x.key === key);
+            const item = itemsById.get(key),
+              draft = draftsByKey.get(key);
             buffers[key] = {
               source: draft?.markdown ?? item?.markdown ?? '',
               revision: buffers[key].revision,
