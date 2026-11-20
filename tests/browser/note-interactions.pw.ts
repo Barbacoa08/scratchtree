@@ -83,11 +83,19 @@ test('confirmed sync with recovery keeps the composer clear and recovery availab
   await expect(page.locator('.workspace-feedback.compact')).toHaveClass(
     /sr-only/,
   );
-  await expect(
-    page.getByRole('button', { name: 'Show Details', exact: true }),
-  ).toHaveAccessibleDescription('Recovery is available in Details.');
-  await page.getByRole('button', { name: 'Show Details', exact: true }).click();
+  const details = page.getByRole('button', {
+    name: 'Show Details',
+    exact: true,
+  });
+  await expect(details).not.toHaveAccessibleDescription(
+    'Recovery is available in Details.',
+  );
+  await expect(details.locator('.details-attention')).toHaveCount(0);
+  await details.click();
   await page.getByRole('button', { name: 'Up to date', exact: true }).click();
+  await expect(
+    page.getByText('1 recovery item', { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Export recovery' }),
   ).toBeVisible();

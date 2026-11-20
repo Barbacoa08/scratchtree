@@ -248,13 +248,6 @@
   let detailsToggle = $state<HTMLButtonElement>();
   let detailsRail = $state<HTMLElement>();
   let detailsPane = $state<HTMLElement>();
-  let recoveryInDetails = $derived(
-    !!sync &&
-      syncState.state === 'up-to-date' &&
-      syncState.recoveries > 0 &&
-      !detailsOpen &&
-      !compactSync,
-  );
   function focusDetailsFromSync() {
     if (
       detailsPane
@@ -1957,21 +1950,8 @@
         title={detailsOpen ? 'Hide Details' : 'Show Details'}
         aria-expanded={detailsOpen}
         aria-controls="workspace-details"
-        aria-describedby={recoveryInDetails
-          ? 'details-recovery-description'
-          : undefined}
-        onclick={toggleDetails}
-        ><Icon name="panel" />
-        {#if recoveryInDetails}<span
-            class="details-attention"
-            aria-hidden="true"
-          ></span>{/if}
-      </button>
-      {#if recoveryInDetails}<span
-          class="sr-only"
-          id="details-recovery-description"
-          >Recovery is available in Details.</span
-        >{/if}
+        onclick={toggleDetails}><Icon name="panel" /></button
+      >
     {/if}
   </header>
   {#if !viewState.loaded}
