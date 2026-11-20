@@ -305,3 +305,56 @@ test('Delete permanently removes selected Trash siblings and retains unrelated r
   expect(marks.items).toHaveLength(3);
   expect(marks.undoDeleteIds).toEqual([]);
 });
+
+test('V flips each selected long note independently and keeps the selection', async ({
+  page,
+}) => {
+  await page.goto('/?fixture');
+  await capture(page).waitFor();
+  const ids = await page.evaluate(async () => {
+    const t = (window as any).__test;
+    const ids = Array.from({ length: 4 }, () => crypto.randomUUID());
+    for (const [index, id] of ids.entries()) {
+      const lineCount = index === 2 ? 1 : 8;
+      await t.repo.captureItem({
+        id,
+        location: { scope: 'live', itemId: null },
+        markdown: Array.from(
+          { length: lineCount },
+          (_, line) => `Preview ${index}, line ${line + 1}`,
+        ).join('\n'),
+        draft: { key: 'compose', revision: 0 },
+      });
+    }
+    await t.controller.start();
+    return ids;
+  });
+  const [first, second, short, unselected] = ids.map((id) => card(page, id));
+  const expand = (note: typeof first) =>
+    note.getByRole('button', { name: 'Expand note', exact: true });
+  const collapse = (note: typeof first) =>
+    note.getByRole('button', { name: 'Collapse note', exact: true });
+  const stream = page.getByRole('region', { name: 'Note stream' });
+
+  await expand(first).click();
+  await expect(collapse(first)).toHaveAttribute('aria-expanded', 'true');
+  await expect(expand(second)).toHaveAttribute('aria-expanded', 'false');
+  await first.getByText('Preview 0, line 1', { exact: false }).click();
+  await short
+    .getByText('Preview 2, line 1', { exact: true })
+    .click({ modifiers: ['Shift'] });
+  await expect.poll(() => selected(page)).toEqual(ids.slice(0, 3));
+  await expect(stream).toBeFocused();
+
+  await page.keyboard.press('v');
+  await expect(expand(first)).toHaveAttribute('aria-expanded', 'false');
+  await expect(collapse(second)).toHaveAttribute('aria-expanded', 'true');
+  await expect(short.locator('button[aria-expanded]')).toHaveCount(0);
+  await expect(expand(unselected)).toHaveAttribute('aria-expanded', 'false');
+  await expect.poll(() => selected(page)).toEqual(ids.slice(0, 3));
+  await expect(stream).toBeFocused();
+
+  await page.keyboard.press('v');
+  await expect(collapse(first)).toHaveAttribute('aria-expanded', 'true');
+  await expect(expand(second)).toHaveAttribute('aria-expanded', 'false');
+});
