@@ -1061,17 +1061,7 @@ kbd {
   margin: 0 0.4rem 0.4rem 0;
 }
 .details-toggle {
-  position: relative;
   display: inline-flex;
-}
-.details-attention {
-  position: absolute;
-  inset-block-start: 0.18rem;
-  inset-inline-end: 0.18rem;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 50%;
-  background: var(--error-border);
 }
 @media (max-width: 1050px) {
   .details-toggle {
