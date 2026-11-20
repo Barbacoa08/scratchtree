@@ -7,11 +7,13 @@
     sync,
     value,
     onattentionchange = () => {},
+    onactionchange = () => {},
     onmodalchange = () => {},
   }: {
     sync: SyncPort;
     value: SyncState;
     onattentionchange?: (active: boolean) => void;
+    onactionchange?: (active: boolean) => void;
     onmodalchange?: (active: boolean) => void;
   } = $props();
   let alive = true;
@@ -22,10 +24,12 @@
   let inspection = $state<Awaited<
     ReturnType<NonNullable<SyncPort['inspectOverflow']>>
   > | null>(null);
-  $effect(() => onattentionchange(expanded || busy || !!error || !!inspection));
+  $effect(() => onattentionchange(expanded));
+  $effect(() => onactionchange(busy || !!error || !!inspection));
   onDestroy(() => {
     alive = false;
     onattentionchange(false);
+    onactionchange(false);
     onmodalchange(false);
   });
   async function perform(action: () => Promise<void>) {
@@ -102,7 +106,7 @@
         </p>
       {/if}
       {#if value.recoveries > 0}<button
-          disabled={busy}
+          aria-disabled={busy}
           onclick={() => void perform(() => sync.exportRecovery())}
           >Export recovery</button
         >{/if}

@@ -1,7 +1,7 @@
 import type { SharedItem, OrderRow, PurgeRow } from './types';
 import type { Item } from '../domain/notes';
 import { validateSnapshot } from '../domain/validation';
-import { directEntries, effectiveScope } from '../domain/hierarchy';
+import { directEntries, scopeIndex } from '../domain/hierarchy';
 import { canonicalJson, digest, type PendingIntent } from './intents';
 import { projectLibrary } from './canonical';
 import { encodeCloudBackup } from './backup';
@@ -64,12 +64,13 @@ export async function classifyOutcome(
   if ('code' in validated) return 'unknown';
   if (remote.epoch !== p.epoch) return 'superseded';
   const items = new Map(remote.items.map((x) => [x.id, x]));
+  const tombstones = new Set(remote.purgedIds);
   for (const id of p.expected.purgedIds)
-    if (!remote.purgedIds.includes(id)) return 'superseded';
+    if (!tombstones.has(id)) return 'superseded';
   for (const outcome of p.expected.items) {
     const actual = items.get(outcome.id);
     if (outcome.kind === 'purge') {
-      if (actual || !remote.purgedIds.includes(outcome.id)) return 'superseded';
+      if (actual || !tombstones.has(outcome.id)) return 'superseded';
       continue;
     }
     if (!actual) return 'superseded';
@@ -107,16 +108,14 @@ export async function classifyOutcome(
   }
   // Desired command outcomes apply even when the local replay had no deltas.
   const command = p.command;
+  let scopes: ReturnType<typeof scopeIndex> | undefined;
+  const scopeOf = (id: string) => (scopes ??= scopeIndex(remote.items)).get(id);
   const inLocation = (id: string, at: import('../domain/notes').Location) => {
     const item = items.get(id);
-    return (
-      !!item &&
-      item.parentId === at.itemId &&
-      effectiveScope(remote.items, id) === at.scope
-    );
+    return !!item && item.parentId === at.itemId && scopeOf(id) === at.scope;
   };
   const purged = (ids: string[]) =>
-    ids.every((id) => !items.has(id) && remote.purgedIds.includes(id));
+    ids.every((id) => !items.has(id) && tombstones.has(id));
   switch (command.kind) {
     case 'saveItemSource':
       if (items.get(command.id)?.markdown !== command.markdown)
@@ -133,6 +132,10 @@ export async function classifyOutcome(
     case 'setItemDone':
       if (items.get(command.id)?.done !== command.done) return 'superseded';
       break;
+    case 'setItemsDone':
+      if (command.ids.some((id) => items.get(id)?.done !== command.done))
+        return 'superseded';
+      break;
     case 'setItemColor':
       if (
         !items.has(command.id) ||
@@ -147,8 +150,7 @@ export async function classifyOutcome(
       if (
         command.request.to.itemId !== null &&
         (items.get(command.request.to.itemId)?.kind !== 'tree' ||
-          effectiveScope(remote.items, command.request.to.itemId) !==
-            command.request.to.scope)
+          scopeOf(command.request.to.itemId) !== command.request.to.scope)
       )
         return 'superseded';
       break;
@@ -157,10 +159,7 @@ export async function classifyOutcome(
         return 'superseded';
       break;
     case 'restoreItem':
-      if (
-        !items.has(command.id) ||
-        effectiveScope(remote.items, command.id) !== 'live'
-      )
+      if (!items.has(command.id) || scopeOf(command.id) !== 'live')
         return 'superseded';
       break;
     case 'purgeItem':
@@ -170,21 +169,23 @@ export async function classifyOutcome(
       if (remote.epoch !== command.epoch || !purged(command.ids))
         return 'superseded';
       break;
-    case 'undoDelete':
+    case 'undoDelete': {
+      const after = new Map(
+        command.request.proof.after.map((item) => [item.id, item]),
+      );
       for (const id of command.request.ids) {
-        const desired = command.request.proof.after.find(
-            (item) => item.id === id,
-          ),
+        const desired = after.get(id),
           actual = items.get(id);
         if (
           !actual ||
           !desired ||
-          effectiveScope(remote.items, id) !== 'live' ||
+          scopeOf(id) !== 'live' ||
           !equal(placement(actual), placement(desired))
         )
           return 'superseded';
       }
       break;
+    }
     case 'reorderItem':
       if (!inLocation(command.request.id, command.request.group))
         return 'superseded';

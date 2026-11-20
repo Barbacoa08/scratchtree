@@ -39,6 +39,7 @@
   import { LocationSelection } from '../workspace/selection';
   import {
     emptyMouseSelection,
+    extendSelection,
     mouseSelect,
     reconcileMouseSelection,
     reorderSelected,
@@ -85,7 +86,17 @@
     recoveries: 0,
   });
   let syncAttention = $state(false);
+  let syncActionActive = $state(false);
   let recoveryModal = $state(false);
+  let compactSync = $derived(
+    !!sync &&
+      (recoveryModal ||
+        syncActionActive ||
+        syncState.overflow ||
+        syncState.state === 'needs-sync' ||
+        (syncState.state !== 'up-to-date' &&
+          (syncState.detail || syncState.recoveries || syncAttention))),
+  );
   let authTrigger = $state<HTMLButtonElement>();
   let dialogWasOpen = false;
   let signOutError = $state<string | null>(null);
@@ -237,6 +248,38 @@
   let detailsToggle = $state<HTMLButtonElement>();
   let detailsRail = $state<HTMLElement>();
   let detailsPane = $state<HTMLElement>();
+  let recoveryInDetails = $derived(
+    !!sync &&
+      syncState.state === 'up-to-date' &&
+      syncState.recoveries > 0 &&
+      !detailsOpen &&
+      !compactSync,
+  );
+  function focusDetailsFromSync() {
+    if (
+      detailsPane
+        ?.querySelector('.sync-status')
+        ?.contains(document.activeElement)
+    )
+      detailsToggle?.focus();
+  }
+  $effect.pre(() => {
+    if (!detailsOpen && !compactSync) focusDetailsFromSync();
+  });
+  function updateSyncAction(active: boolean) {
+    untrack(() => {
+      if (
+        !active &&
+        syncActionActive &&
+        !detailsOpen &&
+        syncState.state === 'up-to-date' &&
+        !syncState.overflow &&
+        !recoveryModal
+      )
+        focusDetailsFromSync();
+      syncActionActive = active;
+    });
+  }
   let composerEpochs = $state<Record<string, number>>({});
   let workspaceEpoch = $state(0);
   let captureKey = $derived(composeKey(viewState.location));
@@ -911,21 +954,20 @@
       ? filterNotes(state.snapshot.items, state.query, state.location.scope)
       : directEntries(state.snapshot, state.location);
   }
-  async function remove(id = selected) {
-    if (!id || blocked) return;
-    const ordinal = shownEntries.findIndex((x) => x.id === id),
+  async function remove(id = selected, ids = [id]) {
+    if (!id || blocked || !ids.length) return;
+    const targets = new Set(ids);
+    const ordinal = shownEntries.findIndex((x) => targets.has(x.id)),
       request = ++interaction,
       focus = observeSubmissionFocus();
     try {
-      const purge =
-        scopes.get(id) === 'trash' ? controller.capturePurge(id) : null;
-      if (
-        !(await (purge
-          ? controller.purgeItem(purge)
-          : controller.remove(id))) ||
-        request !== interaction
-      )
-        return;
+      const removal =
+        scopes.get(id) === 'trash'
+          ? controller.purgeItem(controller.capturePurgeGroup(ids))
+          : ids.length > 1
+            ? controller.removeGroup(ids)
+            : controller.remove(id);
+      if (!(await removal) || request !== interaction) return;
       const entries = currentEntries();
       setSelected(
         entries[Math.min(Math.max(ordinal, 0), entries.length - 1)]?.id ?? '',
@@ -937,6 +979,13 @@
         else composer?.focus();
       }
       scrollSelection();
+    } catch (error) {
+      controller.feedback(
+        '',
+        error instanceof Error
+          ? error.message
+          : 'These notes could not be deleted.',
+      );
     } finally {
       focus.stop();
     }
@@ -1199,6 +1248,10 @@
     } finally {
       focus.stop();
     }
+  }
+  function commandSelection() {
+    if (!shownEntries.some((item) => item.id === selected)) return [];
+    return viewState.query.trim() ? [selected] : selectedGroup(selected);
   }
   function selectedGroup(id: string) {
     return selectedIds.has(id)
@@ -1577,11 +1630,34 @@
             event.key.toLowerCase(),
           ))) ||
       event.altKey ||
-      event.ctrlKey ||
-      event.shiftKey
+      event.ctrlKey
     )
       return;
     const key = event.key.toLowerCase();
+    if (event.shiftKey) {
+      if (
+        !event.metaKey &&
+        !viewState.query.trim() &&
+        event.target === stream &&
+        !window.getSelection()?.toString() &&
+        (key === 'arrowup' || key === 'arrowdown')
+      ) {
+        event.preventDefault();
+        const next = extendSelection(
+          mouseSelection,
+          directEntries(viewState.snapshot, viewState.location).map(
+            (x) => x.id,
+          ),
+          key === 'arrowup' ? -1 : 1,
+        );
+        if (next === mouseSelection) return;
+        ++interaction;
+        mouseSelection = next;
+        selection.remember(viewState.location, next.primary);
+        scrollSelection();
+      }
+      return;
+    }
     if (event.metaKey) {
       if (
         (key === 'arrowup' || key === 'arrowdown') &&
@@ -1607,11 +1683,12 @@
         void undoDelete();
       } else if (
         key === 'backspace' &&
+        !event.repeat &&
         !isTyping(event.target) &&
         !window.getSelection()?.toString()
       ) {
         event.preventDefault();
-        void remove();
+        void remove(selected, commandSelection());
       }
       return;
     }
@@ -1640,7 +1717,19 @@
       openPalette();
     } else if (key === 'x' && selectedNote && !event.repeat) {
       event.preventDefault();
-      void controller.setNoteDone(selectedNote.id, !selectedNote.done);
+      const ids = commandSelection();
+      const targets = new Set(ids);
+      const done = shownEntries.some(
+        (item) => targets.has(item.id) && !item.done,
+      );
+      if (ids.length) void controller.setNotesDone(ids, done);
+    } else if (
+      key === 'v' &&
+      event.target === stream &&
+      selectedNote &&
+      !event.repeat
+    ) {
+      if (noteBodies[selected]?.toggleExpanded()) event.preventDefault();
     } else if (key === 'c' && selectedNote) {
       event.preventDefault();
       void copy(selected);
@@ -1769,14 +1858,7 @@
       !viewState.error &&
       !viewState.completionRetry &&
       !viewState.mutationRetry &&
-      !(
-        sync &&
-        (syncState.state === 'needs-sync' ||
-          syncState.detail ||
-          syncState.recoveries ||
-          syncState.overflow ||
-          syncAttention)
-      )}
+      !compactSync}
     aria-label="Editor status"
   >
     <h2 class:sr-only={compact}><Icon name="info" /> Status</h2>
@@ -1785,13 +1867,16 @@
           ? 'Local saves and cloud sync.'
           : 'Notes and drafts on this Mac.'}
       </p>{/if}
-    {#if sync && (!compact || syncState.state === 'needs-sync' || syncState.detail || syncState.recoveries || syncState.overflow || syncAttention)}<SyncStatus
+    {#if sync && (!compact || compactSync)}<SyncStatus
         {sync}
         value={syncState}
         onattentionchange={(active) => (syncAttention = active)}
+        onactionchange={updateSyncAction}
         onmodalchange={(active) => (recoveryModal = active)}
       />{/if}
-    <p role="status" aria-live="polite">{viewState.status}</p>
+    <p class:sr-only={compact} role="status" aria-live="polite">
+      {viewState.status}
+    </p>
     <p role="alert">{viewState.error}</p>
     {#if paletteRetry && viewState.mutationRetry && paletteRetry.epoch === workspaceEpoch && paletteRetry.identity === controller.mutationRetryIdentity}
       <p role="status">
@@ -1872,8 +1957,22 @@
         title={detailsOpen ? 'Hide Details' : 'Show Details'}
         aria-expanded={detailsOpen}
         aria-controls="workspace-details"
-        onclick={toggleDetails}><Icon name="panel" /></button
-      >{/if}
+        aria-describedby={recoveryInDetails
+          ? 'details-recovery-description'
+          : undefined}
+        onclick={toggleDetails}
+        ><Icon name="panel" />
+        {#if recoveryInDetails}<span
+            class="details-attention"
+            aria-hidden="true"
+          ></span>{/if}
+      </button>
+      {#if recoveryInDetails}<span
+          class="sr-only"
+          id="details-recovery-description"
+          >Recovery is available in Details.</span
+        >{/if}
+    {/if}
   </header>
   {#if !viewState.loaded}
     <section aria-label="Library loading">
@@ -1883,11 +1982,12 @@
             onclick={() => controller.start()}>Retry loading library</button
           >{/if}
       {/if}
-      {#if sync && (syncState.overflow || syncAttention)}
+      {#if sync && (syncState.overflow || syncAttention || syncActionActive)}
         <SyncStatus
           {sync}
           value={syncState}
           onattentionchange={(active) => (syncAttention = active)}
+          onactionchange={updateSyncAction}
           onmodalchange={(active) => (recoveryModal = active)}
         />
       {/if}
@@ -2251,6 +2351,12 @@
                 ><kbd>↑</kbd><kbd>↓</kbd></span
               >
             </div>
+            <div>
+              <span>Extend selection</span><span class="shortcut-keys"
+                ><kbd>Shift</kbd><kbd>↑</kbd><kbd>↓</kbd></span
+              >
+            </div>
+            <div><span>Expand / Collapse note</span><kbd>V</kbd></div>
             <div>
               <span aria-hidden="true">Edit / Copy</span><span class="sr-only"
                 >Edit: E; Copy: C</span

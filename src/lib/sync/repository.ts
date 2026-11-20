@@ -30,7 +30,7 @@ import type {
   CreateChildTree,
   DraftAck,
   MoveItems,
-  PurgeItem,
+  PurgeRequest,
   ReorderItem,
   Repository,
   RemoteBuffer,
@@ -976,6 +976,9 @@ export class DexieRepository implements Repository {
       case 'setItemDone':
         rules.setItemDone(s, c.id, c.done);
         break;
+      case 'setItemsDone':
+        rules.setItemsDone(s, c.ids, c.done);
+        break;
       case 'setItemColor':
         rules.setItemColor(s, c.id, c.color);
         break;
@@ -1267,13 +1270,16 @@ export class DexieRepository implements Repository {
           intent.localApplied &&
           this.outcomeMatches(fresh, intent.expected, intent.command);
         const removed = this.apply(next.snapshot, intent.command);
-        if (!acknowledgedReplay)
+        if (!acknowledgedReplay) {
+          const priorItems = new Map(
+            fresh.snapshot.items.map((item) => [item.id, item]),
+          );
+          const nextPositions = new Map(
+            next.snapshot.items.map((item, index) => [item.id, index]),
+          );
           for (const outcome of intent.expected.items) {
-            const actual =
-              fresh.snapshot.items.find((x) => x.id === outcome.id) ?? null;
-            const at = next.snapshot.items.findIndex(
-              (x) => x.id === outcome.id,
-            );
+            const actual = priorItems.get(outcome.id) ?? null;
+            const at = nextPositions.get(outcome.id) ?? -1;
             if (outcome.kind === 'create') {
               if (actual !== null && !equal(actual, outcome.item))
                 throw stale();
@@ -1313,6 +1319,7 @@ export class DexieRepository implements Repository {
               }
             }
           }
+        }
         next.purgedIds = [...new Set([...fresh.purgedIds, ...removed])];
         this.encode(next);
         await this.persist(fresh, next, intent.recordedAt);
@@ -1353,7 +1360,7 @@ export class DexieRepository implements Repository {
       ...(leave ? { leave } : {}),
     }).then((x) => x.workspace);
   }
-  purgeItem(request: PurgeItem) {
+  purgeItem(request: PurgeRequest) {
     return this.mutate({ kind: 'purgeItem', request });
   }
   transitionLocation(request: TransitionLocation) {
@@ -1374,6 +1381,11 @@ export class DexieRepository implements Repository {
   }
   setItemDone(id: string, done: boolean) {
     return this.mutate({ kind: 'setItemDone', id, done }).then(
+      (x) => x.workspace,
+    );
+  }
+  setItemsDone(ids: string[], done: boolean) {
+    return this.mutate({ kind: 'setItemsDone', ids, done }).then(
       (x) => x.workspace,
     );
   }

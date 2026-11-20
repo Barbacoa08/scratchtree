@@ -193,6 +193,11 @@
       observer.disconnect();
     };
   });
+  export function toggleExpanded() {
+    if (!overflow || readOnly) return false;
+    onexpand(!expanded);
+    return true;
+  }
   export function focus(options?: { end?: boolean }) {
     editor?.focus(options);
   }
@@ -252,9 +257,7 @@
     aria-expanded={expanded}
     disabled={readOnly}
     onmousedown={(event) => event.preventDefault()}
-    onclick={() => {
-      onexpand(!expanded);
-    }}
+    onclick={toggleExpanded}
     >{expanded ? 'Collapse' : 'Expand'}<span
       class="note-expand-chevron"
       class:up={expanded}

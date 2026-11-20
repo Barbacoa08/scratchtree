@@ -204,6 +204,7 @@ export class PersistentSession {
       restoreItem: (...a) => call('restoreItem', ...a),
       undoDelete: (...a) => call('undoDelete', ...a),
       setItemDone: (...a) => call('setItemDone', ...a),
+      setItemsDone: (...a) => call('setItemsDone', ...a),
       setItemColor: (...a) => call('setItemColor', ...a),
       reorderItem: (...a) => call('reorderItem', ...a),
       exportBackup: () => call('exportBackup'),

@@ -271,7 +271,8 @@ button {
 button:hover:enabled {
   background: var(--control-hover);
 }
-button:disabled {
+button:disabled,
+.sync-status button[aria-disabled='true'] {
   cursor: default;
 }
 /* A color write still blocks commands, without dimming the entire workspace.
@@ -425,12 +426,16 @@ kbd {
   padding: 0.25rem 0.4rem;
 }
 .markdown-view {
+  --prose-gap: 0.625rem;
   min-width: 0;
 }
 .markdown-view p {
   margin: 0;
 }
 .markdown-view p + p,
+.markdown-view li + li {
+  margin-block-start: var(--prose-gap);
+}
 .markdown-view ul,
 .markdown-view ol,
 .markdown-view pre {
@@ -554,7 +559,11 @@ kbd {
   min-height: min(8.5rem, 22vh);
 }
 .composer .cm-scroller {
+  flex: 1 1 auto;
   max-height: 9rem;
+}
+.composer .cm-content {
+  align-self: stretch;
 }
 .note-card .cm-editor {
   min-height: 0;
@@ -1052,7 +1061,17 @@ kbd {
   margin: 0 0.4rem 0.4rem 0;
 }
 .details-toggle {
+  position: relative;
   display: inline-flex;
+}
+.details-attention {
+  position: absolute;
+  inset-block-start: 0.18rem;
+  inset-inline-end: 0.18rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--error-border);
 }
 @media (max-width: 1050px) {
   .details-toggle {

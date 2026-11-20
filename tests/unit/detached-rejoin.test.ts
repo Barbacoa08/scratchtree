@@ -4,6 +4,7 @@ import { MAX_SOURCE, type Item } from '../../src/lib/domain/notes';
 import { encodeCloudBackup } from '../../src/lib/sync/backup';
 import type { Transfer } from '../../src/lib/sync/detached';
 import type { PendingIntent } from '../../src/lib/sync/intents';
+import { classifyOutcome } from '../../src/lib/sync/confirmation';
 const id = '00000000-0000-4000-8000-000000000001';
 const item: Item = {
   id,
@@ -90,6 +91,77 @@ describe('same-epoch detached branches', () => {
     expect(result.conflicts).toHaveLength(0);
   });
 });
+it('emits a completion group witness only for an exact whole-group rejoin', async () => {
+  const other = {
+    ...item,
+    id: '00000000-0000-4000-8000-000000000002',
+    position: 1,
+  };
+  const before = lib(item, other);
+  const group = field('setItemDone', 1);
+  group.command = {
+    kind: 'setItemsDone',
+    ids: [item.id, other.id],
+    done: true,
+  };
+  const completion = group.expected.items[0];
+  if (completion.kind !== 'update')
+    throw new Error('Expected completion delta');
+  group.expected.items.push({ ...completion, id: other.id, structural: other });
+  const complete = lib({ ...item, done: true }, { ...other, done: true });
+  const matching = planRejoin(before, complete, before, [group]);
+  expect(matching.admitted).toEqual([group]);
+  expect(
+    await classifyOutcome(
+      group,
+      {
+        id: group.id,
+        digest: group.digest,
+        epoch: group.epoch,
+        recordedAt: group.recordedAt,
+      },
+      { ...matching.library, epoch: group.epoch },
+    ),
+  ).toBe('matching');
+
+  const reversal = field('setItemDone', 2);
+  reversal.command = { kind: 'setItemDone', id, done: false };
+  const outcome = reversal.expected.items[0];
+  if (outcome.kind === 'update')
+    outcome.fields.done = { before: true, after: false };
+  const revised = planRejoin(
+    before,
+    lib(item, { ...other, done: true }),
+    before,
+    [group, reversal],
+  );
+  expect(revised.admitted).toEqual([]);
+  expect(revised.conflicts).toEqual([group]);
+  expect(revised.library).toEqual(before);
+
+  const unchangedMember = { ...item, done: true };
+  group.expected.items.shift();
+  const noOpConflict = planRejoin(
+    lib(unchangedMember, other),
+    complete,
+    before,
+    [group],
+  );
+  expect(noOpConflict.admitted).toEqual([]);
+  expect(noOpConflict.conflicts).toEqual([group]);
+  expect(noOpConflict.library).toEqual(before);
+  const zeroWrite = lib(item, { ...other, done: true });
+  const zeroWriteConflict = planRejoin(
+    lib(unchangedMember, other),
+    complete,
+    zeroWrite,
+    [group],
+  );
+  expect(zeroWriteConflict.admitted).toEqual([]);
+  expect(zeroWriteConflict.conflicts).toEqual([group]);
+  expect(zeroWriteConflict.library).toEqual(zeroWrite);
+});
+
 it('refuses an old purge if the Trash tree gained a new child', () => {
   const trash = {
     ...item,

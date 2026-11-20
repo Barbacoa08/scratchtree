@@ -31,6 +31,9 @@ export interface PurgeItem {
   location: Location;
   expectedSubtreeIds: string[];
 }
+export type PurgeRequest =
+  | PurgeItem
+  | { ids: string[]; location: Location; expectedSubtreeIds: string[] };
 export interface PurgeResult {
   workspace: WorkspaceSnapshot;
   removedIds: string[];
@@ -100,12 +103,13 @@ export interface Repository {
   createChildTree(request: CreateChildTree): Promise<WorkspaceSnapshot>;
   promoteItem(id: string): Promise<WorkspaceSnapshot>;
   deleteItem(id: string, leave?: Location): Promise<WorkspaceSnapshot>;
-  purgeItem(request: PurgeItem): Promise<PurgeResult>;
+  purgeItem(request: PurgeRequest): Promise<PurgeResult>;
   transitionLocation(request: TransitionLocation): Promise<WorkspaceSnapshot>;
   moveItems(request: MoveItems): Promise<WorkspaceSnapshot>;
   restoreItem(id: string): Promise<WorkspaceSnapshot>;
   undoDelete(request: UndoDeleteRequest): Promise<WorkspaceSnapshot>;
   setItemDone(id: string, done: boolean): Promise<WorkspaceSnapshot>;
+  setItemsDone(ids: string[], done: boolean): Promise<WorkspaceSnapshot>;
   setItemColor(
     id: string,
     color: ColorToken | null,

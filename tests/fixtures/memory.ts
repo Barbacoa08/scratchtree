@@ -12,7 +12,7 @@ import type {
   CaptureItem,
   CreateChildTree,
   ReorderItem,
-  PurgeItem,
+  PurgeRequest,
   MoveItems,
   TransitionLocation,
   UndoDeleteRequest,
@@ -112,6 +112,10 @@ export class MemoryRepository implements Repository {
     this.check('completion');
     return this.mutate((s) => items.setItemDone(s, id, done));
   }
+  async setItemsDone(ids: string[], done: boolean) {
+    this.check('completion');
+    return this.mutate((s) => items.setItemsDone(s, ids, done));
+  }
   async setItemColor(id: string, color: ColorToken | null) {
     this.check('color');
     return this.mutate((s) => items.setItemColor(s, id, color));
@@ -130,7 +134,7 @@ export class MemoryRepository implements Repository {
     this.check('delete');
     return this.mutate((s) => items.deleteItem(s, id, leave));
   }
-  async purgeItem(request: PurgeItem) {
+  async purgeItem(request: PurgeRequest) {
     this.check('purge');
     const s = structuredClone(this.snapshot);
     const removedIds = items.purgeItem(s, request);

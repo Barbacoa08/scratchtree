@@ -24,6 +24,7 @@ const parser = new MarkdownIt({
   html: false,
   linkify: false,
   typographer: false,
+  breaks: true,
 });
 const escape = parser.utils.escapeHtml;
 function highlightCode(source: string, info: string) {

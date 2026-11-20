@@ -4,7 +4,7 @@ import type {
   CaptureItem,
   CreateChildTree,
   ReorderItem,
-  PurgeItem,
+  PurgeRequest,
   TransitionLocation,
   MoveItems,
   UndoDeleteRequest,
@@ -171,11 +171,24 @@ export function restoreItem(s: WorkspaceSnapshot, id: string) {
 }
 export function setItemDone(s: WorkspaceSnapshot, id: string, done: boolean) {
   if (typeof done !== 'boolean') throw new Error('Invalid completion state.');
-  const x = find(s, id);
-  if (x.done !== done) {
-    x.done = done;
-    touch(x);
+  applyDone(find(s, id), done);
+}
+function applyDone(item: Item, done: boolean) {
+  if (item.done !== done) {
+    item.done = done;
+    touch(item);
   }
+}
+export function setItemsDone(
+  s: WorkspaceSnapshot,
+  ids: string[],
+  done: boolean,
+) {
+  if (typeof done !== 'boolean') throw new Error('Invalid completion state.');
+  const wanted = uniqueIds(ids);
+  const targets = s.items.filter((item) => wanted.has(item.id));
+  if (!wanted.size || targets.length !== wanted.size) throw stale();
+  for (const item of targets) applyDone(item, done);
 }
 export function setItemColor(
   s: WorkspaceSnapshot,
@@ -227,7 +240,10 @@ function uniqueIds(ids: string[]) {
   return new Set(ids);
 }
 /** Parent edges only; remembered restore links never imply ownership. */
-export function subtreeIds(s: WorkspaceSnapshot, id: string): string[] {
+export function subtreeIds(
+  s: WorkspaceSnapshot,
+  roots: string | string[],
+): string[] {
   const children = new Map<string, string[]>();
   for (const x of s.items)
     if (x.parentId !== null) {
@@ -236,7 +252,7 @@ export function subtreeIds(s: WorkspaceSnapshot, id: string): string[] {
       children.set(x.parentId, list);
     }
   const result = new Set<string>(),
-    pending = [id];
+    pending = typeof roots === 'string' ? [roots] : [...roots];
   while (pending.length) {
     const key = pending.pop()!;
     if (result.has(key)) continue;
@@ -245,23 +261,32 @@ export function subtreeIds(s: WorkspaceSnapshot, id: string): string[] {
   }
   return [...result].sort();
 }
-export function purgeItem(s: WorkspaceSnapshot, r: PurgeItem): string[] {
+export function purgeItem(s: WorkspaceSnapshot, r: PurgeRequest): string[] {
+  const roots = uniqueIds('id' in r ? [r.id] : r.ids);
   const expected = uniqueIds(r.expectedSubtreeIds);
-  if (!expected.has(r.id)) throw stale();
-  const target = s.items.find((x) => x.id === r.id);
-  if (!target) {
+  if (
+    r.location.scope !== 'trash' ||
+    !roots.size ||
+    [...roots].some((id) => !expected.has(id))
+  )
+    throw stale();
+  const present = s.items.filter((item) => roots.has(item.id));
+  if (!present.length) {
     const folded = new Set([...expected].map((id) => id.toLowerCase()));
     if (s.items.some((x) => folded.has(x.id.toLowerCase()))) throw stale();
     return [...expected].sort();
   }
+  const old = directEntries(s, r.location);
+  const siblings = new Set(old.map((item) => item.id));
   if (
-    effectiveScope(s.items, r.id) !== 'trash' ||
-    !sameLocation(itemLocation(s.items, r.id), r.location)
+    present.length !== roots.size ||
+    (r.location.itemId !== null &&
+      effectiveScope(s.items, r.location.itemId) !== 'trash') ||
+    [...roots].some((id) => !siblings.has(id))
   )
     throw stale();
-  const removed = subtreeIds(s, r.id);
+  const removed = subtreeIds(s, [...roots]);
   if (!sameIds(removed, [...expected].sort())) throw stale();
-  const old = directEntries(s, r.location);
   s.items = s.items.filter((x) => !expected.has(x.id));
   for (const x of s.items)
     if (x.restoreParentId !== null && expected.has(x.restoreParentId))
@@ -637,27 +662,8 @@ function replayMatches(
     )
       return false;
   }
-  // One traversal per workspace computes selected-subtree membership, including unchanged descendants.
-  const subtreeSets = (workspace: WorkspaceSnapshot) => {
-    const children = new Map<string, string[]>();
-    for (const x of workspace.items)
-      if (x.parentId !== null) {
-        const list = children.get(x.parentId) ?? [];
-        list.push(x.id);
-        children.set(x.parentId, list);
-      }
-    const result = new Set<string>(),
-      pending = [...roots];
-    while (pending.length) {
-      const id = pending.pop()!;
-      if (result.has(id)) continue;
-      result.add(id);
-      pending.push(...(children.get(id) ?? []));
-    }
-    return [...result].sort();
-  };
-  const wanted = subtreeSets(after),
-    found = subtreeSets(s);
+  const wanted = subtreeIds(after, [...roots]),
+    found = subtreeIds(s, [...roots]);
   return (
     sameIds(wanted, found) &&
     wanted.every((id) => equal(expected.get(id), actual.get(id)))

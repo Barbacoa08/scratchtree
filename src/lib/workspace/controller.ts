@@ -1,4 +1,10 @@
-import { captureMoveProof, captureUndoDelete } from '../domain/items';
+import {
+  captureMoveProof,
+  captureUndoDelete,
+  moveItems as validateMove,
+  purgeItem as validatePurge,
+  subtreeIds,
+} from '../domain/items';
 import {
   emptyWorkspace,
   type WorkspaceSnapshot,
@@ -13,7 +19,6 @@ import {
   directEntries,
 } from '../domain/hierarchy';
 import { filterNotes } from '../domain/search';
-import { subtreeIds } from '../domain/items';
 import type {
   Repository,
   RemoteBuffer,
@@ -22,6 +27,7 @@ import type {
   CreateChildTree,
   ReorderItem,
   PurgeItem,
+  PurgeRequest,
   PurgeResult,
   MoveItems,
   TransitionLocation,
@@ -43,6 +49,11 @@ export type WorkspaceOperation =
   | 'export'
   | 'preview-restore'
   | 'restore';
+class ChangedGroupDeletion extends Error {}
+
+type CompletionIntent =
+  { id: string; done: boolean } | { ids: string[]; done: boolean };
+
 export interface ViewState {
   snapshot: WorkspaceSnapshot;
   purgedItemIds: string[];
@@ -60,7 +71,7 @@ export interface ViewState {
   status: string;
   error: string;
   preview: RestorePreview | null;
-  completionRetry: { id: string; done: boolean } | null;
+  completionRetry: CompletionIntent | null;
 }
 export class WorkspaceController {
   state: ViewState = {
@@ -103,6 +114,7 @@ export class WorkspaceController {
   private storedRetryIntent: (() => Promise<boolean>) | null = null;
   private retryGenerations = new WeakMap<() => Promise<boolean>, number>();
   private completionGenerations = new WeakMap<object, number>();
+  private groupDeleteRetries = new WeakMap<() => Promise<boolean>, string>();
   private get retryIntent() {
     return this.storedRetryIntent;
   }
@@ -113,7 +125,10 @@ export class WorkspaceController {
   }
   // Lost purge replies retain their exact reconciliation independently of newer
   // failed commands, which may need to checkpoint an already removed owner.
-  private uncertainPurgeRetries = new Map<string, () => Promise<boolean>>();
+  private uncertainPurgeRetries = new Map<
+    string,
+    { request: PurgeRequest; retry: () => Promise<boolean> }
+  >();
   constructor(private repo: Repository) {}
   subscribe(fn: (s: ViewState) => void) {
     this.listeners.add(fn);
@@ -673,7 +688,16 @@ export class WorkspaceController {
     return this.navigate(composeKey(at), at, true, true);
   }
   private get pendingMutationRetry() {
-    return this.uncertainPurgeRetries.values().next().value ?? this.retryIntent;
+    const retries = [...this.uncertainPurgeRetries.values()];
+    return (
+      retries.find(({ retry }) => this.isCurrentRetry(retry))?.retry ??
+      this.retryIntent ??
+      retries[0]?.retry ??
+      null
+    );
+  }
+  private isCurrentRetry(retry: () => Promise<boolean>) {
+    return this.retryGenerations.get(retry) === this.state.cacheGeneration;
   }
   // The most recent command can retain its own UI context while an uncertain
   // purge takes priority. It becomes active only when these identities match.
@@ -687,7 +711,7 @@ export class WorkspaceController {
   async retryMutation() {
     const intent = this.pendingMutationRetry;
     if (!intent) return false;
-    if (this.retryGenerations.get(intent) !== this.state.cacheGeneration) {
+    if (!this.isCurrentRetry(intent)) {
       this.error(
         new Error(
           'The library was replaced. Captured work is retained for recovery.',
@@ -838,8 +862,15 @@ export class WorkspaceController {
     });
   }
   setNoteDone(id: string, done: boolean) {
-    const intent = { id, done },
-      revision = ++this.completionIntent;
+    return this.applyCompletion({ id, done });
+  }
+  setNotesDone(ids: string[], done: boolean) {
+    return ids.length === 1
+      ? this.setNoteDone(ids[0], done)
+      : this.applyCompletion({ ids: [...ids], done });
+  }
+  private applyCompletion(intent: CompletionIntent) {
+    const revision = ++this.completionIntent;
     this.completionGenerations.set(intent, this.state.cacheGeneration);
     return this.run(async () => {
       this.patch({ operation: 'completion', error: '' });
@@ -852,7 +883,11 @@ export class WorkspaceController {
             });
           return false;
         }
-        this.snapshot(await this.repo.setItemDone(intent.id, intent.done));
+        this.snapshot(
+          await ('id' in intent
+            ? this.repo.setItemDone(intent.id, intent.done)
+            : this.repo.setItemsDone(intent.ids, intent.done)),
+        );
         if (revision === this.completionIntent)
           this.patch({
             completionRetry: null,
@@ -886,9 +921,7 @@ export class WorkspaceController {
       );
       return Promise.resolve(false);
     }
-    return intent
-      ? this.setNoteDone(intent.id, intent.done)
-      : Promise.resolve(false);
+    return intent ? this.applyCompletion(intent) : Promise.resolve(false);
   }
   remove(id = this.state.activeKey) {
     if (composeOwner(id)) return Promise.resolve(false);
@@ -977,21 +1010,69 @@ export class WorkspaceController {
       expectedSubtreeIds: subtreeIds(this.state.snapshot, id),
     };
   }
-  purgeItem(request: PurgeItem): Promise<boolean> {
-    return this.runPurge(structuredClone(request), false);
+  capturePurgeGroup(ids: string[]): PurgeRequest {
+    if (ids.length === 1) return this.capturePurge(ids[0]);
+    const group = this.captureGroup(ids);
+    if (group.from.scope !== 'trash')
+      throw new Error('Only notes in Trash can be permanently deleted.');
+    return {
+      ids: group.ids,
+      location: group.from,
+      expectedSubtreeIds: subtreeIds(this.state.snapshot, group.ids),
+    };
   }
-  private retainPurgeRetry(captured: PurgeItem, attempted: boolean) {
-    const pending = this.uncertainPurgeRetries.get(captured.id);
+  purgeItem(request: PurgeRequest): Promise<boolean> {
+    const key =
+      'id' in request ? request.id : JSON.stringify([...request.ids].sort());
+    const pending = this.uncertainPurgeRetries.get(key);
+    if (pending) {
+      if (!this.isCurrentRetry(pending.retry)) this.acknowledgePurgeRetry(key);
+      else if ('ids' in request) return pending.retry();
+    }
+    const ids = new Set(request.expectedSubtreeIds);
+    for (const [activeKey, active] of this.uncertainPurgeRetries) {
+      if (
+        activeKey !== key &&
+        this.isCurrentRetry(active.retry) &&
+        ('ids' in request || 'ids' in active.request) &&
+        active.request.expectedSubtreeIds.some((id) => ids.has(id))
+      ) {
+        this.error(
+          new Error(
+            'Retry the pending permanent deletion before deleting any of the same notes.',
+          ),
+        );
+        return Promise.resolve(false);
+      }
+    }
+    return this.runPurge(structuredClone(request), key, false);
+  }
+  private retainPurgeRetry(
+    captured: PurgeRequest,
+    key: string,
+    attempted: boolean,
+  ) {
+    const pending = this.uncertainPurgeRetries.get(key);
     if (!pending) {
-      const retry = () => this.runPurge(captured, attempted);
-      if (attempted) this.uncertainPurgeRetries.set(captured.id, retry);
+      const retry = () => this.runPurge(captured, key, attempted);
+      if (attempted)
+        this.uncertainPurgeRetries.set(key, { request: captured, retry });
       this.retryIntent = retry;
     }
     // Repeated Delete/reconciliation reuses the exact pending purge, without
     // replacing a newer failed command that will become Retry after its ACK.
     this.patch({ mutationRetry: true });
   }
-  private runPurge(captured: PurgeItem, replay: boolean): Promise<boolean> {
+  private acknowledgePurgeRetry(key: string) {
+    const retry = this.uncertainPurgeRetries.get(key)?.retry;
+    this.uncertainPurgeRetries.delete(key);
+    if (this.retryIntent === retry) this.retryIntent = null;
+  }
+  private runPurge(
+    captured: PurgeRequest,
+    key: string,
+    replay: boolean,
+  ): Promise<boolean> {
     return this.run(async () => {
       this.patch({ operation: 'purge' });
       let attempted = replay;
@@ -1000,9 +1081,27 @@ export class WorkspaceController {
         const prior = this.state.snapshot;
         if (replay) {
           const current = await this.repo.loadWorkspace();
-          if (!current.items.some((x) => x.id === captured.id)) {
-            // This is an exact neutral postcondition acknowledgment, not a new
-            // deletion. Removed-owner buffers cannot be flushed after a lost reply.
+          const roots = new Set(
+            'id' in captured ? [captured.id] : captured.ids,
+          );
+          if ('ids' in captured) {
+            try {
+              validatePurge(structuredClone(current), captured);
+            } catch {
+              // A changed subtree, including a surviving descendant of an
+              // absent root, cannot acknowledge this atomic purge.
+              this.acknowledgePurgeRetry(key);
+              this.patch({ mutationRetry: this.pendingMutationRetry !== null });
+              this.error(
+                new Error(
+                  'The Trash selection changed. Review it before deleting again.',
+                ),
+              );
+              return false;
+            }
+          }
+          if (!current.items.some((x) => roots.has(x.id))) {
+            // Acknowledge the existing deletion before flushing removed-owner buffers.
             result = await this.repo.purgeItem(captured);
           }
         }
@@ -1011,7 +1110,7 @@ export class WorkspaceController {
             !(await this.checkpoint()) ||
             !(await this.reconcileCreations())
           ) {
-            this.retainPurgeRetry(captured, replay);
+            this.retainPurgeRetry(captured, key, replay);
             return false;
           }
           attempted = true;
@@ -1053,14 +1152,14 @@ export class WorkspaceController {
             parent = index.get(parent)?.parentId ?? null;
           at = { scope: at.scope, itemId: parent };
         }
-        const acknowledgedRetry = this.uncertainPurgeRetries.get(captured.id);
-        this.uncertainPurgeRetries.delete(captured.id);
-        if (this.retryIntent === acknowledgedRetry) this.retryIntent = null;
-        if (
-          this.state.completionRetry &&
-          removed.has(this.state.completionRetry.id)
-        )
-          this.completionIntent++;
+        this.acknowledgePurgeRetry(key);
+        const completion = this.state.completionRetry;
+        const removesCompletionTarget =
+          completion &&
+          ('id' in completion
+            ? removed.has(completion.id)
+            : completion.ids.some((id) => removed.has(id)));
+        if (removesCompletionTarget) this.completionIntent++;
         this.patch({
           snapshot: result.workspace,
           location: at,
@@ -1069,11 +1168,7 @@ export class WorkspaceController {
           purgedItemIds: [
             ...new Set([...this.state.purgedItemIds, ...result.removedIds]),
           ],
-          completionRetry:
-            this.state.completionRetry &&
-            removed.has(this.state.completionRetry.id)
-              ? null
-              : this.state.completionRetry,
+          completionRetry: removesCompletionTarget ? null : completion,
           mutationRetry: this.pendingMutationRetry !== null,
           error: '',
           status: 'Permanently deleted',
@@ -1082,7 +1177,7 @@ export class WorkspaceController {
         return true;
       } catch (e) {
         this.error(e);
-        this.retainPurgeRetry(captured, attempted);
+        this.retainPurgeRetry(captured, key, attempted);
         return false;
       } finally {
         this.patch({ operation: null });
@@ -1175,6 +1270,43 @@ export class WorkspaceController {
       afterTo: [...finalOrder],
     });
   }
+  removeGroup(ids: string[]): Promise<boolean> {
+    const key = JSON.stringify([...ids].sort());
+    const prior = this.retryIntent;
+    if (
+      prior &&
+      this.isCurrentRetry(prior) &&
+      this.groupDeleteRetries.get(prior) === key
+    )
+      return prior();
+    const trash: Location = { scope: 'trash', itemId: null };
+    const captured = this.captureMove(
+      ids,
+      trash,
+      directEntries(this.state.snapshot, trash).length,
+    );
+    const retry = (): Promise<boolean> =>
+      this.itemMetadata(
+        'delete',
+        async () => {
+          if (this.retryIntent === retry) {
+            const current = await this.repo.loadWorkspace();
+            try {
+              validateMove(structuredClone(current), captured);
+            } catch {
+              throw new ChangedGroupDeletion(
+                'The selection changed. Review the notes and delete again.',
+              );
+            }
+          }
+          return this.repo.moveItems(captured);
+        },
+        'Deleted. Undo delete is available.',
+        retry,
+      );
+    this.groupDeleteRetries.set(retry, key);
+    return retry();
+  }
   moveItems(request: MoveItems): Promise<boolean> {
     const captured = structuredClone(request);
     return this.itemMetadata(
@@ -1256,17 +1388,19 @@ export class WorkspaceController {
     operation: WorkspaceOperation,
     fn: () => Promise<WorkspaceSnapshot>,
     status: string,
+    retry?: () => Promise<boolean>,
   ) {
+    const repeat = retry ?? (() => this.itemMetadata(operation, fn, status));
     return this.run(async () => {
       this.patch({ operation });
       try {
         if (!(await this.checkpoint())) {
-          this.retryIntent = () => this.itemMetadata(operation, fn, status);
+          this.retryIntent = repeat;
           this.patch({ mutationRetry: true });
           return false;
         }
         if (!(await this.reconcileCreations())) {
-          this.retryIntent = () => this.itemMetadata(operation, fn, status);
+          this.retryIntent = repeat;
           this.patch({ mutationRetry: true });
           return false;
         }
@@ -1281,8 +1415,8 @@ export class WorkspaceController {
         return true;
       } catch (e) {
         this.error(e);
-        this.retryIntent = () => this.itemMetadata(operation, fn, status);
-        this.patch({ mutationRetry: true });
+        this.retryIntent = e instanceof ChangedGroupDeletion ? null : repeat;
+        this.patch({ mutationRetry: this.pendingMutationRetry !== null });
         return false;
       } finally {
         this.patch({ operation: null });
