@@ -1722,7 +1722,9 @@
       selectedNote &&
       !event.repeat
     ) {
-      if (noteBodies[selected]?.toggleExpanded()) event.preventDefault();
+      for (const id of commandSelection()) {
+        if (noteBodies[id]?.toggleExpanded()) event.preventDefault();
+      }
     } else if (key === 'c' && selectedNote) {
       event.preventDefault();
       void copy(selected);
@@ -2163,8 +2165,7 @@
                 selectedEditingContext = { id: entry.id, fenced };
               }}
               onopen={(url) => void open(url)}
-              onexpand={(expanded) =>
-                (expandedNotes = { ...expandedNotes, [entry.id]: expanded })}
+              onexpand={(expanded) => (expandedNotes[entry.id] = expanded)}
             />
           {/each}
           {#if !shownEntries.length}<p class="empty-stream">
@@ -2336,7 +2337,7 @@
                 ><kbd>Shift</kbd><kbd>↑</kbd><kbd>↓</kbd></span
               >
             </div>
-            <div><span>Expand / Collapse note</span><kbd>V</kbd></div>
+            <div><span>Expand / Collapse selected notes</span><kbd>V</kbd></div>
             <div>
               <span aria-hidden="true">Edit / Copy</span><span class="sr-only"
                 >Edit: E; Copy: C</span
