@@ -4,6 +4,7 @@ import {
   moveItems as validateMove,
   purgeItem as validatePurge,
   subtreeIds,
+  StaleStructureError,
 } from '../domain/items';
 import {
   emptyWorkspace,
@@ -19,6 +20,7 @@ import {
   directEntries,
 } from '../domain/hierarchy';
 import { filterNotes } from '../domain/search';
+import { reorderSelected } from './mouse-selection';
 import type {
   Repository,
   RemoteBuffer,
@@ -45,11 +47,48 @@ export type WorkspaceOperation =
   | 'restore-item'
   | 'color'
   | 'reorder'
+  | 'keyboard-reorder'
   | 'delete'
   | 'export'
   | 'preview-restore'
   | 'restore';
 class ChangedGroupDeletion extends Error {}
+class ChangedKeyboardOrder extends Error {
+  constructor(
+    message = 'The sibling order changed. Review the notes before reordering again.',
+  ) {
+    super(message);
+  }
+}
+
+type KeyboardOrder = { location: Location; ids: string[] };
+type KeyboardReorder = {
+  generation: number;
+  epoch: Repository['viewEpoch'];
+  location: Location;
+  selected: string[];
+  desired: string[];
+  write: { before: string[]; after: string[]; request?: MoveItems };
+  failed: boolean;
+};
+
+function sameOrder(left: readonly string[], right: readonly string[]) {
+  return (
+    left.length === right.length &&
+    left.every((id, index) => id === right[index])
+  );
+}
+function sameLocation(left: Location, right: Location) {
+  return left.scope === right.scope && left.itemId === right.itemId;
+}
+
+export function projectedSiblingOrder(state: ViewState) {
+  return !state.query.trim() &&
+    state.keyboardOrder &&
+    sameLocation(state.location, state.keyboardOrder.location)
+    ? state.keyboardOrder.ids
+    : null;
+}
 
 type CompletionIntent =
   { id: string; done: boolean } | { ids: string[]; done: boolean };
@@ -61,6 +100,8 @@ export interface ViewState {
   ownerId: string | null;
   location: Location;
   mutationRetry: boolean;
+  keyboardOrder: KeyboardOrder | null;
+  keyboardReorderRetry: boolean;
   activeKey: string;
   buffers: Record<string, { source: string; revision: number }>;
   source: string;
@@ -81,6 +122,8 @@ export class WorkspaceController {
     ownerId: null,
     location: { scope: 'live', itemId: null },
     mutationRetry: false,
+    keyboardOrder: null,
+    keyboardReorderRetry: false,
     activeKey: 'compose',
     buffers: { compose: { source: '', revision: 0 } },
     source: '',
@@ -98,6 +141,9 @@ export class WorkspaceController {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private saving: Promise<boolean> | null = null;
+  private keyboardAdmissionBarriers = 0;
+  private activeKeyboardReorder: KeyboardReorder | null = null;
+  private failedKeyboardReorder: KeyboardReorder | null = null;
   private creating: Promise<boolean> | null = null;
   private dirty = new Set<string>();
   private pendingRemoteOrigin: string | undefined;
@@ -302,6 +348,16 @@ export class WorkspaceController {
           }
         }
         if (refresh?.replaced) {
+          const interruptedReorder = this.failedKeyboardReorder;
+          this.failedKeyboardReorder = null;
+          if (interruptedReorder) {
+            this.error(
+              new Error(
+                'The library was replaced before the keyboard reorder could be recovered.',
+              ),
+            );
+            this.patch({ keyboardReorderRetry: false });
+          }
           this.captureIntents.clear();
           this.reconciledCaptures.clear();
           this.childIntents.clear();
@@ -396,7 +452,7 @@ export class WorkspaceController {
     });
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
-      void this.flush();
+      void this.run(() => this.checkpoint());
     }, 300);
   }
   // Called only inside the repository queue. Captures checkpoint; existing notes commit.
@@ -457,8 +513,35 @@ export class WorkspaceController {
     }
     return !this.disposed;
   }
+  private runWithKeyboardBarrier(
+    fn: (reorder: KeyboardReorder | null) => Promise<boolean>,
+  ) {
+    // Lock admission before the barrier queues. A draft checkpoint may await
+    // storage with no visible operation while the native window is still open.
+    this.keyboardAdmissionBarriers++;
+    const reorder = this.activeKeyboardReorder;
+    return this.run(() => fn(reorder)).finally(() => {
+      this.keyboardAdmissionBarriers--;
+    });
+  }
+  private async checkpointForLifecycle(reorder: KeyboardReorder | null) {
+    if (!(await this.checkpoint())) return false;
+    if (this.failedKeyboardReorder) {
+      this.error(new Error('Retry the keyboard reorder before continuing.'));
+      return false;
+    }
+    return !reorder?.failed;
+  }
   flush() {
-    return this.run(() => this.checkpoint());
+    return this.runWithKeyboardBarrier((reorder) =>
+      this.checkpointForLifecycle(reorder),
+    );
+  }
+  retryKeyboardReorder() {
+    if (this.activeKeyboardReorder || this.keyboardAdmissionBarriers > 0)
+      return Promise.resolve(false);
+    const failed = this.failedKeyboardReorder;
+    return failed ? this.saveKeyboardReorder(failed) : Promise.resolve(true);
   }
   private navigate(
     key: string,
@@ -1246,29 +1329,179 @@ export class WorkspaceController {
       afterTo,
     });
   }
-  captureReorder(ids: string[], finalOrder: string[]): MoveItems {
-    const source = this.captureGroup(ids),
-      selected = new Set(source.ids);
-    const members = new Set(source.order);
+  stageKeyboardReorder(
+    ids: readonly string[],
+    displayed: readonly string[],
+    direction: -1 | 1,
+    afterPaint: () => Promise<void>,
+  ) {
+    const active = this.activeKeyboardReorder;
+    const { location, cacheGeneration, operation, query, loaded } = this.state;
     if (
-      finalOrder.length !== source.order.length ||
-      new Set(finalOrder).size !== finalOrder.length ||
-      finalOrder.some((id) => !members.has(id)) ||
-      finalOrder.filter((id) => selected.has(id)).join() !==
-        source.ids.join() ||
-      finalOrder.filter((id) => !selected.has(id)).join() !==
-        source.order.filter((id) => !selected.has(id)).join()
+      this.disposed ||
+      !loaded ||
+      query.trim() ||
+      this.keyboardAdmissionBarriers > 0 ||
+      this.failedKeyboardReorder ||
+      (operation !== null &&
+        operation !== 'save' &&
+        operation !== 'keyboard-reorder')
     )
-      throw new Error('Invalid sibling order.');
-    return captureMoveProof(this.state.snapshot, {
-      ids: source.ids,
-      from: { ...source.from },
-      to: { ...source.from },
-      beforeFrom: [...source.order],
-      beforeTo: [...source.order],
-      afterFrom: [...finalOrder],
-      afterTo: [...finalOrder],
+      return false;
+
+    const before = active?.desired ?? [...displayed];
+    const group = new Set(ids);
+    const selected = before.filter((id) => group.has(id));
+    if (!selected.length || selected.length !== group.size) return false;
+    if (
+      active &&
+      (!sameLocation(active.location, location) ||
+        active.generation !== cacheGeneration ||
+        active.epoch !== this.repo.viewEpoch ||
+        !sameOrder(active.selected, selected))
+    )
+      return false;
+
+    const desired = reorderSelected(before, selected, direction);
+    if (sameOrder(before, desired)) return false;
+
+    if (active) {
+      active.desired = desired;
+    } else {
+      const batch: KeyboardReorder = {
+        generation: cacheGeneration,
+        epoch: this.repo.viewEpoch,
+        location: { ...location },
+        selected,
+        desired,
+        write: { before, after: desired },
+        failed: false,
+      };
+      void this.saveKeyboardReorder(batch, afterPaint);
+    }
+    this.patch({
+      keyboardOrder: { location, ids: desired },
+      status: 'Saving order…',
     });
+    return true;
+  }
+
+  private captureKeyboardWrite(batch: KeyboardReorder) {
+    const { location, selected, write } = batch;
+    const snapshot = this.state.snapshot;
+    if (
+      (location.itemId !== null &&
+        (!snapshot.items.some(
+          (item) => item.id === location.itemId && item.kind === 'tree',
+        ) ||
+          effectiveScope(snapshot.items, location.itemId) !==
+            location.scope)) ||
+      !sameOrder(
+        directEntries(snapshot, location).map((item) => item.id),
+        write.before,
+      )
+    )
+      throw new ChangedKeyboardOrder();
+    return captureMoveProof(snapshot, {
+      ids: selected,
+      from: location,
+      to: location,
+      beforeFrom: write.before,
+      beforeTo: write.before,
+      afterFrom: write.after,
+      afterTo: write.after,
+    });
+  }
+
+  private ensureKeyboardEpoch(batch: KeyboardReorder) {
+    if (
+      batch.generation !== this.state.cacheGeneration ||
+      batch.epoch !== this.repo.viewEpoch
+    )
+      throw new ChangedKeyboardOrder(
+        'The library was replaced before the keyboard reorder could finish.',
+      );
+  }
+
+  private saveKeyboardReorder(
+    batch: KeyboardReorder,
+    afterPaint?: () => Promise<void>,
+  ) {
+    const retrying = this.failedKeyboardReorder === batch;
+    this.activeKeyboardReorder = batch;
+    this.failedKeyboardReorder = null;
+    return this.run(async () => {
+      this.patch({ operation: 'keyboard-reorder' });
+      try {
+        // Capture only sibling IDs on keydown. Full structural proof generation
+        // runs after the first visual update and normal source checkpoint.
+        await afterPaint?.();
+        const ensureEpoch = () => this.ensureKeyboardEpoch(batch);
+        ensureEpoch();
+        const checkpointed = await this.checkpoint();
+        ensureEpoch();
+        const reconciled =
+          checkpointed &&
+          (await this.reconcileCreations(undefined, {
+            ensureBinding: ensureEpoch,
+            epoch: batch.epoch ?? undefined,
+          }));
+        ensureEpoch();
+        if (!reconciled) {
+          batch.failed = true;
+          this.failedKeyboardReorder = batch;
+          return false;
+        }
+        if (retrying && batch.write.request) {
+          try {
+            validateMove(
+              structuredClone(this.state.snapshot),
+              batch.write.request,
+            );
+          } catch {
+            throw new ChangedKeyboardOrder();
+          }
+        }
+        while (!this.disposed) {
+          const write = batch.write;
+          write.request ??= this.captureKeyboardWrite(batch);
+          const snapshot = await this.repo.moveItems(write.request);
+          ensureEpoch();
+          this.snapshot(snapshot);
+          this.reconcileScope();
+          if (sameOrder(write.after, batch.desired)) break;
+          batch.write = { before: write.after, after: batch.desired };
+        }
+        batch.failed = false;
+        this.patch({ status: 'Order updated', error: '' });
+        return !this.disposed;
+      } catch (error) {
+        batch.failed = true;
+        if (error instanceof StaleStructureError)
+          this.error(new ChangedKeyboardOrder());
+        else {
+          if (
+            !(error instanceof ChangedKeyboardOrder) &&
+            !(
+              typeof error === 'object' &&
+              error &&
+              'code' in error &&
+              error.code === 'library_replaced'
+            )
+          )
+            this.failedKeyboardReorder = batch;
+          this.error(error);
+        }
+        return false;
+      } finally {
+        this.activeKeyboardReorder = null;
+        this.patch({
+          keyboardOrder: null,
+          keyboardReorderRetry: this.failedKeyboardReorder !== null,
+          operation: null,
+        });
+      }
+    }, true);
   }
   removeGroup(ids: string[]): Promise<boolean> {
     const key = JSON.stringify([...ids].sort());
@@ -1315,14 +1548,18 @@ export class WorkspaceController {
       'Notes moved',
     );
   }
-  private async reconcileCreations(skipChild?: string): Promise<boolean> {
+  private async reconcileCreations(
+    skipChild?: string,
+    binding?: { ensureBinding: () => void; epoch?: string },
+  ): Promise<boolean> {
     if (
       !this.captureIntents.size &&
       ![...this.childIntents.keys()].some((id) => id !== skipChild)
     )
       return true;
     try {
-      let current = await this.repo.loadWorkspace();
+      let current = await this.repo.loadWorkspace(binding?.epoch);
+      binding?.ensureBinding();
       for (const [key, request] of this.captureIntents) {
         const existing = current.items.find(
           (x) => x.id.toLowerCase() === request.id.toLowerCase(),
@@ -1341,6 +1578,7 @@ export class WorkspaceController {
                   }
                 : request;
             current = await this.repo.captureItem(replay);
+            binding?.ensureBinding();
             this.reconciledCaptures.add(request.id);
           }
         } else {
@@ -1350,14 +1588,19 @@ export class WorkspaceController {
       }
       for (const [id, request] of this.childIntents) {
         if (id === skipChild) continue;
-        if (current.items.some((x) => x.id.toLowerCase() === id.toLowerCase()))
+        if (
+          current.items.some((x) => x.id.toLowerCase() === id.toLowerCase())
+        ) {
           current = await this.repo.createChildTree(request);
+          binding?.ensureBinding();
+        }
         this.childIntents.delete(id);
         if (this.creationIntent?.id === id) this.creationIntent = null;
       }
       this.snapshot(current);
       return true;
     } catch (e) {
+      if (binding) throw e;
       this.error(e);
       return false;
     }
@@ -1456,8 +1699,8 @@ export class WorkspaceController {
   }
 
   export(successStatus = 'Backup exported') {
-    return this.run(async () => {
-      if (!(await this.checkpoint())) return false;
+    return this.runWithKeyboardBarrier(async (reorder) => {
+      if (!(await this.checkpointForLifecycle(reorder))) return false;
       this.patch({ operation: 'export' });
       try {
         const path = await this.repo.exportBackup();
@@ -1475,8 +1718,8 @@ export class WorkspaceController {
     });
   }
   previewRestore() {
-    return this.run(async () => {
-      if (!(await this.checkpoint())) return false;
+    return this.runWithKeyboardBarrier(async (reorder) => {
+      if (!(await this.checkpointForLifecycle(reorder))) return false;
       this.patch({ operation: 'preview-restore' });
       try {
         const preview = await this.repo.previewRestore();
@@ -1495,10 +1738,11 @@ export class WorkspaceController {
     });
   }
   restore(confirm = true) {
-    return this.run(async () => {
+    return this.runWithKeyboardBarrier(async (reorder) => {
       const p = this.state.preview;
       if (!p) return false;
-      if (confirm && !(await this.checkpoint())) return false;
+      if (confirm && !(await this.checkpointForLifecycle(reorder)))
+        return false;
       this.patch({ operation: 'restore' });
       try {
         const s = await this.repo.confirmRestore(p.token, confirm);

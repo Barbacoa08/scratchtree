@@ -153,6 +153,28 @@ test('noncontiguous Command arrows collect a block and drag inserts the captured
   await expect(
     card(page, ids[1]).getByRole('button', { name: 'Mark done', exact: true }),
   ).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const { controller, repo } = (window as any).__test;
+        return {
+          operation: controller.state.operation,
+          order: repo.snapshot.items
+            .filter(
+              (item: { parentId: string | null }) => item.parentId === null,
+            )
+            .sort(
+              (a: { position: number }, b: { position: number }) =>
+                a.position - b.position,
+            )
+            .map((item: { id: string }) => item.id),
+        };
+      }),
+    )
+    .toEqual({
+      operation: null,
+      order: [ids[0], ids[1], ids[3], ids[2], ids[4]],
+    });
   const transfer = await page.evaluateHandle(() => new DataTransfer());
   await card(page, ids[1])
     .getByRole('button', { name: 'Reorder note', exact: true })
@@ -191,13 +213,15 @@ test('failed group movement retries captured membership after a newer selection 
   });
   await page.keyboard.press('Meta+ArrowUp');
   await expect(
-    page.getByRole('button', { name: 'Retry action', exact: true }),
+    page.getByRole('button', { name: 'Retry reorder', exact: true }),
   ).toBeVisible();
   await card(page, ids[4]).click();
   await page.evaluate(() => {
     (window as any).__test.repo.fail = null;
   });
-  await page.getByRole('button', { name: 'Retry action', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Retry reorder', exact: true })
+    .click();
   await expect
     .poll(() =>
       page

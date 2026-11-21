@@ -226,10 +226,14 @@ const sameLocation = (a: Location, b: Location) =>
   a.scope === b.scope && a.itemId === b.itemId;
 const sameIds = (a: string[], b: string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
-const stale = () =>
-  new Error(
-    'The captured notes or destination changed. Review the action again; your content is retained.',
-  );
+export class StaleStructureError extends Error {
+  constructor() {
+    super(
+      'The captured notes or destination changed. Review the action again; your content is retained.',
+    );
+  }
+}
+const stale = () => new StaleStructureError();
 function uniqueIds(ids: string[]) {
   if (
     !Array.isArray(ids) ||

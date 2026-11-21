@@ -7,9 +7,10 @@ const capture = (p: Page) =>
 async function seed(
   p: Page,
   sources = ['first **exact**', 'tree source', 'last `exact`'],
+  fixture = '/?fixture',
 ) {
   await p.setViewportSize({ width: 1400, height: 900 });
-  await p.goto('/?fixture');
+  await p.goto(fixture);
   await expect(capture(p)).toBeVisible();
   return p.evaluate(async (sources) => {
     const t = (window as any).__test;
@@ -87,9 +88,351 @@ async function sameNodes(p: Page) {
       ),
   ).toBe(true);
 }
-// Catches pre-ack mutation, absent cosmetic movement, overshoot, identity loss,
+test('two distinct keyboard taps move the visible cards within 100 ms while the first save is held', async ({
+  page,
+}) => {
+  const ids = await seed(page, ['One', 'Two', 'Three', 'Four', 'Five']);
+  await card(page, ids[4]).click();
+  await holdFirstMove(page);
+  await page.evaluate((id) => {
+    const t = (window as any).__test;
+    const row = document.querySelector(`[data-entry-id="${id}"]`)!;
+    window.addEventListener(
+      'keydown',
+      (event) => {
+        if (event.key !== 'ArrowUp' || !event.metaKey || t.firstReorderMovement)
+          return;
+        const initialY = row.getBoundingClientRect().y;
+        const start = performance.now();
+        t.firstReorderMovement = new Promise<number>((resolve) => {
+          function sample() {
+            const elapsed = performance.now() - start;
+            if (Math.abs(row.getBoundingClientRect().y - initialY) >= 2) {
+              resolve(elapsed);
+            } else if (elapsed >= 165) {
+              resolve(elapsed);
+            } else {
+              requestAnimationFrame(sample);
+            }
+          }
+          requestAnimationFrame(sample);
+        });
+      },
+      { capture: true },
+    );
+  }, ids[4]);
+
+  await page.keyboard.down('Meta');
+  await page.keyboard.press('ArrowUp');
+  const firstMovement = page.evaluate(
+    () => (window as any).__test.firstReorderMovement,
+  );
+  await expect.poll(() => moves(page)).toHaveLength(1);
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.up('Meta');
+
+  const visibleBeforeAcknowledgment = await order(page);
+  const latest = [ids[0], ids[1], ids[4], ids[2], ids[3]];
+  expect.soft(await firstMovement).toBeLessThanOrEqual(100);
+  expect.soft(visibleBeforeAcknowledgment).toEqual(latest);
+  expect(await storedOrder(page)).toEqual(ids);
+
+  await releaseMove(page);
+  await expect.poll(() => storedOrder(page)).toEqual(latest);
+  expect(await moves(page)).toHaveLength(2);
+  await expect(page.locator('.note-stream')).toBeFocused();
+  await expect(card(page, ids[4])).toHaveClass(/\bselected\b/);
+});
+
+async function holdFirstMove(page: Page, loseAcknowledgment = false) {
+  await page.evaluate((loseAcknowledgment) => {
+    const t = (window as any).__test;
+    const move = t.repo.moveItems.bind(t.repo);
+    t.heldMoves = [];
+    t.repo.moveItems = async (request: unknown) => {
+      t.heldMoves.push(request);
+      if (t.heldMoves.length === 1) {
+        await new Promise<void>((resolve) => {
+          t.releaseReorder = resolve;
+        });
+        const saved = await move(request);
+        if (loseAcknowledgment)
+          throw Error('Synthetic lost reorder acknowledgment');
+        return saved;
+      }
+      return move(request);
+    };
+  }, loseAcknowledgment);
+}
+const moves = (page: Page) =>
+  page.evaluate(() => (window as any).__test.heldMoves);
+const releaseMove = (page: Page) =>
+  page.evaluate(() => (window as any).__test.releaseReorder());
+const storedOrder = (page: Page) =>
+  page.evaluate(() =>
+    [...(window as any).__test.repo.snapshot.items]
+      .filter((item) => item.parentId === null)
+      .sort((left, right) => left.position - right.position)
+      .map((item) => item.id),
+  );
+
+test('held keyboard reorder keeps only the latest follow-up order and close waits for it', async ({
+  page,
+}) => {
+  const ids = await seed(
+    page,
+    ['One', 'Two', 'Three', 'Four', 'Five'],
+    '/?fixture&lifecycle',
+  );
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await holdFirstMove(page);
+  await card(page, ids[4]).click();
+  await page.keyboard.press('Meta+ArrowUp');
+  await expect.poll(() => moves(page)).toHaveLength(1);
+  await page.keyboard.press('Meta+ArrowUp');
+  await page.keyboard.press('Meta+ArrowDown');
+  await page.keyboard.press('Meta+ArrowUp');
+  const latest = [ids[0], ids[1], ids[4], ids[2], ids[3]];
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    t.closedAtOrder = null;
+    void t.requestClose().then(() => {
+      t.closedAtOrder = [...t.repo.snapshot.items]
+        .sort((left, right) => left.position - right.position)
+        .map((item) => item.id);
+    });
+  });
+  expect.soft(await order(page)).toEqual(latest);
+  expect(await active(page)).toBe(0);
+  expect(await storedOrder(page)).toEqual(ids);
+  expect(
+    await page.evaluate(() => (window as any).__test.windowState.hidden),
+  ).toBe(0);
+  await releaseMove(page);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__test.closedAtOrder))
+    .toEqual(latest);
+  expect(
+    await page.evaluate(() => (window as any).__test.windowState.hidden),
+  ).toBe(1);
+  const requests = await moves(page);
+  expect(requests.map((request: any) => request.afterTo)).toEqual([
+    [ids[0], ids[1], ids[2], ids[4], ids[3]],
+    latest,
+  ]);
+});
+
+test('a close checkpoint prevents new keyboard reorder admission until close finishes', async ({
+  page,
+}) => {
+  const ids = await seed(page, undefined, '/?fixture&lifecycle');
+  await holdFirstMove(page);
+  await card(page, ids[2]).click();
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    t.delayCheckpoint();
+    t.controller.editContext('compose', 'draft while closing');
+    void t.requestClose();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__test.repo.checkpointCalls),
+    )
+    .toBe(1);
+  await page.keyboard.press('Meta+ArrowUp');
+  const visibleDuringClose = await order(page);
+  await page.evaluate(() => (window as any).__test.releaseCheckpoint());
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__test.windowState.hidden))
+    .toBe(1);
+  expect(visibleDuringClose).toEqual(ids);
+  expect(await moves(page)).toHaveLength(0);
+  expect(await storedOrder(page)).toEqual(ids);
+});
+
+test('Retry reorder cannot queue behind a close checkpoint that is already running', async ({
+  page,
+}) => {
+  const ids = await seed(page, undefined, '/?fixture&lifecycle');
+  await card(page, ids[2]).click();
+  await page.evaluate(() => ((window as any).__test.repo.fail = 'move'));
+  await page.keyboard.press('Meta+ArrowUp');
+  const retry = page.getByRole('button', {
+    name: 'Retry reorder',
+    exact: true,
+  });
+  await expect(retry).toBeVisible();
+  await holdFirstMove(page);
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    t.repo.fail = null;
+    t.delayCheckpoint();
+    t.controller.editContext('compose', 'draft while retry waits');
+    void t.requestClose();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__test.repo.checkpointCalls),
+    )
+    .toBe(1);
+  await retry.click();
+  await page.evaluate(() => (window as any).__test.releaseCheckpoint());
+  const recovery = page.getByRole('region', { name: 'Could not hide window' });
+  await expect(recovery).toBeVisible();
+  expect(await moves(page)).toHaveLength(0);
+  expect(
+    await page.evaluate(() => (window as any).__test.windowState.hidden),
+  ).toBe(0);
+
+  await recovery.getByRole('button', { name: 'Retry and hide' }).click();
+  await expect.poll(() => moves(page)).toHaveLength(1);
+  expect(
+    await page.evaluate(() => (window as any).__test.windowState.hidden),
+  ).toBe(0);
+  await releaseMove(page);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__test.windowState.hidden))
+    .toBe(1);
+  expect(await storedOrder(page)).toEqual([ids[0], ids[2], ids[1]]);
+});
+
+test('a failed keyboard reorder keeps its own Retry after navigation and explains a blocked backup', async ({
+  page,
+}) => {
+  const ids = await seed(page);
+  await page.setViewportSize({ width: 900, height: 750 });
+  await card(page, ids[2]).click();
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    t.controller.editContext('compose', 'checkpoint before reorder');
+    t.repo.fail = 'checkpoint';
+  });
+  await page.keyboard.press('Meta+ArrowUp');
+  await expect(page.getByRole('alert')).toContainText(
+    'Synthetic local checkpoint failure',
+  );
+  const retry = page.getByRole('button', {
+    name: 'Retry reorder',
+    exact: true,
+  });
+  await expect(retry).toBeVisible();
+  await expect
+    .soft(page.getByRole('button', { name: 'Retry saving changes' }))
+    .toHaveCount(0);
+  await page.evaluate(() => ((window as any).__test.repo.fail = null));
+  await page.getByRole('button', { name: 'Trash', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Trash', exact: true }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(retry).toBeVisible();
+
+  await page
+    .getByRole('button', { name: 'Export backup', exact: true })
+    .click();
+  await expect
+    .soft(page.getByRole('alert'))
+    .toContainText('Retry the keyboard reorder');
+  expect(
+    await page.evaluate(() => (window as any).__test.repo.exported),
+  ).toBeNull();
+  await retry.click();
+  await expect.poll(() => storedOrder(page)).toEqual([ids[0], ids[2], ids[1]]);
+  await expect(retry).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Trash', exact: true }),
+  ).toHaveAttribute('aria-current', 'page');
+});
+
+test('a lost first acknowledgment retries the exact write before saving the newest projected order', async ({
+  page,
+}) => {
+  const ids = await seed(page, ['One', 'Two', 'Three', 'Four', 'Five']);
+  await holdFirstMove(page, true);
+  await handle(page, ids[4]).focus();
+  await page.keyboard.press('Meta+ArrowUp');
+  await expect.poll(() => moves(page)).toHaveLength(1);
+  await page.keyboard.press('Meta+ArrowUp');
+  expect
+    .soft(await order(page))
+    .toEqual([ids[0], ids[1], ids[4], ids[2], ids[3]]);
+  await releaseMove(page);
+  await expect(page.getByRole('alert')).toContainText(
+    'Synthetic lost reorder acknowledgment',
+  );
+  expect(await order(page)).toEqual(ids);
+  await card(page, ids[0]).click();
+  await page
+    .getByRole('button', { name: 'Retry reorder', exact: true })
+    .click();
+  await expect
+    .poll(() => storedOrder(page))
+    .toEqual([ids[0], ids[1], ids[4], ids[2], ids[3]]);
+  const requests = await moves(page);
+  expect(requests).toHaveLength(3);
+  expect(requests[1]).toEqual(requests[0]);
+  await expect(card(page, ids[0])).toHaveClass(/\bselected\b/);
+});
+
+test('a late acknowledgment cannot overwrite a replacement or save the follow-up in a different epoch', async ({
+  page,
+}) => {
+  const ids = await seed(page, ['One', 'Two', 'Three', 'Four', 'Five']);
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    const move = t.repo.moveItems.bind(t.repo);
+    t.heldMoves = [];
+    t.repo.viewEpoch = 'old-library';
+    t.replacement = structuredClone(t.repo.snapshot);
+    t.replacement.items[4].markdown = 'Replacement source';
+    t.repo.moveItems = async (request: unknown) => {
+      t.heldMoves.push(request);
+      const oldAcknowledgment = await move(request);
+      if (t.heldMoves.length === 1) {
+        await new Promise<void>((resolve) => {
+          t.releaseReorder = resolve;
+        });
+      }
+      return oldAcknowledgment;
+    };
+  });
+  await card(page, ids[4]).click();
+  await page.keyboard.press('Meta+ArrowUp');
+  await expect
+    .poll(() =>
+      page.evaluate(() => typeof (window as any).__test.releaseReorder),
+    )
+    .toBe('function');
+  await page.keyboard.press('Meta+ArrowUp');
+  expect(await order(page)).toEqual([ids[0], ids[1], ids[4], ids[2], ids[3]]);
+  await page.getByRole('searchbox').fill('Replacement');
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    t.repo.viewEpoch = 'new-library';
+    // Include the first move in the replacement so an unguarded coalesced
+    // request could otherwise pass its exact structural proof there.
+    t.replacement.items[3].position = 4;
+    t.replacement.items[4].position = 3;
+    void t.remoteReplace(t.replacement);
+    t.releaseReorder();
+  });
+  await expect(card(page, ids[4])).toContainText('Replacement source');
+  expect(await moves(page)).toHaveLength(1);
+  expect(await storedOrder(page)).toEqual([
+    ids[0],
+    ids[1],
+    ids[2],
+    ids[4],
+    ids[3],
+  ]);
+  await expect(page.getByRole('searchbox')).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Retry reorder' })).toHaveCount(
+    0,
+  );
+});
+
+// Catches premature persistence, absent cosmetic movement, overshoot, identity loss,
 // scroll additions, and source/rank changes beyond the authoritative reorder.
-test('acknowledged keyboard reorder moves real keyed cards through intermediate positions without changing source or viewport', async ({
+test('keyboard reorder animates the same keyed cards before saving without changing source or viewport', async ({
   page,
 }) => {
   const ids = await seed(page);
@@ -99,30 +442,14 @@ test('acknowledged keyboard reorder moves real keyed cards through intermediate 
   );
   const y0 = (await card(page, ids[1]).boundingBox())!.y;
   const destinationY = (await card(page, ids[0]).boundingBox())!.y;
-  await page.evaluate(() => {
-    const t = (window as any).__test,
-      reorder = t.repo.moveItems.bind(t.repo);
-    t.repo.moveItems = async (request: any) => {
-      await new Promise<void>((r) => {
-        t.releaseReorder = r;
-      });
-      return reorder(request);
-    };
-  });
+  await holdFirstMove(page);
   await handle(page, ids[1]).focus();
   await page.keyboard.press('Meta+ArrowUp');
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).__test.controller.state.operation),
-    )
-    .toBe('move');
-  expect(await order(page)).toEqual(ids);
-  expect(await active(page)).toBe(0);
+  await expect.poll(() => moves(page)).toHaveLength(1);
+  expect(await order(page)).toEqual([ids[1], ids[0], ids[2]]);
   expect(
     await page.evaluate(() => (window as any).__test.repo.snapshot),
   ).toEqual(before);
-  await page.evaluate(() => (window as any).__test.releaseReorder());
-  await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
   await moving(page);
   const samples = await card(page, ids[1]).evaluate((el) => {
     const animation = el.getAnimations()[0];
@@ -141,6 +468,8 @@ test('acknowledged keyboard reorder moves real keyed cards through intermediate 
   expect(samples[2]).toBeLessThan(samples[0]);
   for (let i = 1; i < samples.length; i++)
     expect(samples[i]).toBeLessThanOrEqual(samples[i - 1]);
+  await releaseMove(page);
+  await expect.poll(() => storedOrder(page)).toEqual([ids[1], ids[0], ids[2]]);
   await settled(page);
   await sameNodes(page);
   await expect(handle(page, ids[1])).toBeFocused();

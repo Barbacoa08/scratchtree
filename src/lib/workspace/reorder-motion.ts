@@ -1,6 +1,6 @@
 import { tick } from 'svelte';
 
-// Cosmetic FLIP on real keyed cards, after the acknowledged order is rendered.
+// Cosmetic FLIP on real keyed cards after their order is rendered.
 // Scheduling after tick leaves existing nearest-item visibility authoritative.
 export function createReorderMotion(getStream: () => HTMLElement | undefined) {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -151,4 +151,22 @@ export function createReorderMotion(getStream: () => HTMLElement | undefined) {
       reduced.removeEventListener('change', preferenceChanged);
     },
   };
+}
+
+/** Let the browser present the keyed move before building its durable proof. */
+export async function afterReorderPaint() {
+  await tick();
+  if (document.hidden) return;
+  await new Promise<void>((resolve) => {
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(finish);
+    });
+    // A hidden or throttled window must still drain its accepted writes.
+    const timeout = setTimeout(finish, 50);
+    function finish() {
+      cancelAnimationFrame(frame);
+      clearTimeout(timeout);
+      resolve();
+    }
+  });
 }

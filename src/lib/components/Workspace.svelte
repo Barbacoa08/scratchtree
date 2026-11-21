@@ -11,7 +11,10 @@
   import ColorPalette from './ColorPalette.svelte';
   import MoveDialog, { type MoveDestination } from './MoveDialog.svelte';
   import { SiblingDrag, siblingDragType } from '../workspace/sibling-drag';
-  import { createReorderMotion } from '../workspace/reorder-motion';
+  import {
+    afterReorderPaint,
+    createReorderMotion,
+  } from '../workspace/reorder-motion';
   import type { MoveItems } from '../platform/workspace';
   import Icon from './Icon.svelte';
   import TreeSidebar from './TreeSidebar.svelte';
@@ -48,7 +51,11 @@
     reorderSelected,
     type MouseSelection,
   } from '../workspace/mouse-selection';
-  import { WorkspaceController, type ViewState } from '../workspace/controller';
+  import {
+    projectedSiblingOrder,
+    WorkspaceController,
+    type ViewState,
+  } from '../workspace/controller';
   import type { Repository } from '../platform/workspace';
   import { copyMarkdown, openExternal } from '../platform/actions';
   import { filterNotes } from '../domain/search';
@@ -345,15 +352,24 @@
   let editorStates = $state.raw(new Map<string, EditorState>());
   const focusRequestCleanups = new Set<() => void>();
   let disposed = false;
-  let visibleNotes = $derived(
-    viewState.query.trim()
-      ? filterNotes(
-          viewState.snapshot.items,
-          viewState.query,
-          viewState.location.scope,
-        )
-      : directEntries(viewState.snapshot, viewState.location),
+  let siblings = $derived(
+    directEntries(viewState.snapshot, viewState.location),
   );
+  let visibleNotes = $derived.by(() => {
+    if (viewState.query.trim())
+      return filterNotes(
+        viewState.snapshot.items,
+        viewState.query,
+        viewState.location.scope,
+      );
+    const projected = projectedSiblingOrder(viewState);
+    if (!projected) return siblings;
+    const byId = new Map(siblings.map((item) => [item.id, item]));
+    return projected.length === siblings.length &&
+      projected.every((id) => byId.has(id))
+      ? projected.map((id) => byId.get(id)!)
+      : siblings;
+  });
   let activeNote = $derived(
     viewState.snapshot.items.find((n) => n.id === viewState.activeKey),
   );
@@ -386,19 +402,28 @@
   );
   let blocked = $derived(
     webSuspended ||
+      viewState.keyboardOrder !== null ||
       (viewState.operation !== null && viewState.operation !== 'save') ||
       modal,
   );
   let navigationBlocked = $derived(
     webSuspended ||
+      viewState.keyboardOrder !== null ||
       modal ||
       (viewState.operation !== null &&
         !['save', 'navigate', 'promote'].includes(viewState.operation)),
   );
   let editorReadOnly = $derived(
     webSuspended ||
+      viewState.keyboardOrder !== null ||
       modal ||
       (viewState.operation !== null && viewState.operation !== 'save'),
+  );
+  let keyboardReorderBlocked = $derived(
+    webSuspended ||
+      modal ||
+      palette !== null ||
+      (blocked && !viewState.keyboardOrder),
   );
   let selectedNote = $derived(
     viewState.snapshot.items.find((n) => n.id === selected),
@@ -420,8 +445,7 @@
         : null;
     if (!hintTextSelected && !viewState.query.trim()) {
       const id = handleId ?? (!typing && selectedVisible ? selected : null);
-      const siblings = directEntries(viewState.snapshot, viewState.location);
-      const before = siblings.map((item) => item.id);
+      const before = visibleNotes.map((item) => item.id);
       const ids = id
         ? selectedIds.has(id)
           ? before.filter((entry) => selectedIds.has(entry))
@@ -576,8 +600,8 @@
       const locationChanged =
         next.location.scope !== previous.location.scope ||
         next.location.itemId !== previous.location.itemId;
-      // Capture only acknowledged sibling-order changes before Svelte moves the
-      // existing keyed cards. Source saves and other snapshot changes only settle.
+      // Capture keyed card geometry before Svelte renders a changed order.
+      // Ordinary drag and M still animate from the acknowledged snapshot.
       if (
         locationChanged ||
         next.query !== previous.query ||
@@ -585,7 +609,15 @@
         next.buffers !== previous.buffers
       )
         reorderMotion?.cancel();
-      if (next.snapshot !== previous.snapshot) {
+      const projectedOrder = projectedSiblingOrder(next);
+      const priorProjection = projectedSiblingOrder(previous);
+      if (projectedOrder && projectedOrder !== priorProjection) {
+        reorderMotion?.reorder(projectedOrder);
+      } else if (
+        !projectedOrder &&
+        !priorProjection &&
+        next.snapshot !== previous.snapshot
+      ) {
         const before = directEntries(previous.snapshot, previous.location);
         const after = directEntries(next.snapshot, next.location);
         const old = new Map(before.map((item) => [item.id, item]));
@@ -609,6 +641,8 @@
         if (siblingReorder)
           reorderMotion?.reorder(after.map((item) => item.id));
         else reorderMotion?.cancel();
+      } else if (priorProjection && !projectedOrder && next.error) {
+        reorderMotion?.cancel();
       }
       // Subscribe sees each patch synchronously; Svelte effects can coalesce the
       // operation/location/finally patches and lose the structural cause.
@@ -1021,6 +1055,28 @@
       setSelected('');
       await tick();
       if (focus.mayRestore()) stream?.focus();
+    } finally {
+      focus.stop();
+    }
+  }
+  async function retryOrder() {
+    if (blocked) return;
+    const original = document.activeElement;
+    const request = ++interaction;
+    const epoch = workspaceEpoch;
+    const focus = observeSubmissionFocus();
+    try {
+      await controller.retryKeyboardReorder();
+      await tick();
+      if (
+        request !== interaction ||
+        epoch !== workspaceEpoch ||
+        !focus.mayRestore()
+      )
+        return;
+      if (original instanceof HTMLElement && original.isConnected)
+        original.focus({ preventScroll: true });
+      else stream?.focus({ preventScroll: true });
     } finally {
       focus.stop();
     }
@@ -1474,7 +1530,7 @@
       event.repeat ||
       event.isComposing ||
       event.defaultPrevented ||
-      blocked ||
+      keyboardReorderBlocked ||
       window.getSelection()?.toString() ||
       !['ArrowUp', 'ArrowDown'].includes(event.key)
     )
@@ -1487,29 +1543,38 @@
       );
       return;
     }
-    const siblings = directEntries(
-      controller.state.snapshot,
-      controller.state.location,
-    );
-    const ids = selectedGroup(id),
-      before = siblings.map((item) => item.id);
-    const after = reorderSelected(
-      before,
-      ids,
-      event.key === 'ArrowUp' ? -1 : 1,
-    );
-    if (after.every((item, index) => item === before[index])) return;
-    try {
-      void executeMove(
-        controller.captureReorder(ids, after),
-        selectedIds.has(id) ? selected : id,
-      );
-    } catch {
-      controller.feedback(
-        '',
-        'These notes can no longer be reordered together.',
-      );
+    const original = document.activeElement;
+    const focus = observeSubmissionFocus();
+    if (
+      !controller.stageKeyboardReorder(
+        selectedIds.has(id) ? [...selectedIds] : [id],
+        visibleNotes.map((item) => item.id),
+        event.key === 'ArrowUp' ? -1 : 1,
+        afterReorderPaint,
+      )
+    ) {
+      focus.stop();
+      return;
     }
+
+    const request = ++interaction;
+    if (!selectedIds.has(id)) setSelected(id);
+    selection.remember(controller.state.location, selected);
+    void tick().then(() => {
+      try {
+        if (request !== interaction || !focus.mayRestore()) return;
+        if (
+          original instanceof HTMLButtonElement &&
+          original.classList.contains('drag-handle') &&
+          original.isConnected &&
+          document.activeElement !== original
+        )
+          original.focus({ preventScroll: true });
+        scrollSelection();
+      } finally {
+        focus.stop();
+      }
+    });
   }
   function startDrag(event: DragEvent, id: string) {
     reorderMotion?.cancel();
@@ -1642,6 +1707,15 @@
     }
   }
   function commands(event: KeyboardEvent) {
+    const key = event.key.toLowerCase();
+    if (
+      primaryModifier(event) &&
+      (key === 'arrowup' || key === 'arrowdown') &&
+      !isTyping(event.target)
+    ) {
+      if (viewState.loaded) moveKey(event, selected);
+      return;
+    }
     if (
       event.isComposing ||
       palette ||
@@ -1656,7 +1730,6 @@
       secondaryModifier(event)
     )
       return;
-    const key = event.key.toLowerCase();
     if (event.shiftKey) {
       if (
         !primaryModifier(event) &&
@@ -1682,12 +1755,7 @@
       return;
     }
     if (primaryModifier(event)) {
-      if (
-        (key === 'arrowup' || key === 'arrowdown') &&
-        !isTyping(event.target)
-      ) {
-        moveKey(event, selected);
-      } else if (key === 'n') {
+      if (key === 'n') {
         event.preventDefault();
         void writeNote();
       } else if (key === 'f') {
@@ -1860,7 +1928,11 @@
   }
   async function retryClose() {
     try {
-      if (await controller.flush()) await finishClose();
+      if (
+        (await controller.retryKeyboardReorder()) &&
+        (await controller.flush())
+      )
+        await finishClose();
     } catch {
       showCloseFailure();
     }
@@ -1883,6 +1955,7 @@
       !viewState.error &&
       !viewState.completionRetry &&
       !viewState.mutationRetry &&
+      !viewState.keyboardReorderRetry &&
       !compactSync}
     aria-label="Editor status"
   >
@@ -1907,6 +1980,12 @@
       {viewState.status}
     </p>
     <p role="alert">{viewState.error}</p>
+    {#if viewState.keyboardReorderRetry}
+      <p role="status">Keyboard reorder still needs to be saved.</p>
+      <button disabled={blocked} onclick={() => void retryOrder()}
+        >Retry reorder</button
+      >
+    {/if}
     {#if paletteRetry && viewState.mutationRetry && paletteRetry.epoch === workspaceEpoch && paletteRetry.identity === controller.mutationRetryIdentity}
       <p role="status">
         Retry color: {paletteRetry.color
@@ -1922,7 +2001,7 @@
         disabled={blocked}
         onclick={() => void retryAction()}>Retry action</button
       >
-    {:else if viewState.error}<button
+    {:else if viewState.error && !viewState.keyboardReorderRetry}<button
         disabled={blocked}
         onclick={() => controller.flush()}>Retry saving changes</button
       ><button disabled={blocked} onclick={() => submit(viewState.activeKey)}
@@ -2181,6 +2260,9 @@
               states={editorStates}
               readOnly={editorReadOnly}
               disabled={blocked}
+              reorderDisabled={keyboardReorderBlocked ||
+                (viewState.keyboardOrder !== null &&
+                  !selectedIds.has(entry.id))}
               expanded={expandedNotes[entry.id] ?? false}
               outsideSearch={viewState.activeKey === entry.id &&
                 !visibleNotes.some((x) => x.id === entry.id)}

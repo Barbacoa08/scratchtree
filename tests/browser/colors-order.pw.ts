@@ -382,13 +382,15 @@ test('move failure retries original destination after selection changes, without
   });
   await page.keyboard.press('Meta+ArrowDown');
   await expect(
-    page.getByRole('button', { name: 'Retry action', exact: true }),
+    page.getByRole('button', { name: 'Retry reorder', exact: true }),
   ).toBeVisible();
   await card(page, ids[2]).click();
   await page.evaluate(() => {
     (window as any).__test.repo.fail = null;
   });
-  await page.getByRole('button', { name: 'Retry action', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Retry reorder', exact: true })
+    .click();
   await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
   await expect(capture(page)).toHaveText('pending capture');
   await card(page, ids[0]).click();

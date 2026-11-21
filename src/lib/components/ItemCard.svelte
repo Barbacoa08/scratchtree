@@ -41,6 +41,7 @@
     oncopycode,
     onexpand,
     reorderable,
+    reorderDisabled,
     dropEdge,
     ondragstart,
     ondragend,
@@ -82,6 +83,7 @@
     oncopycode: (code: string) => void;
     onexpand: (expanded: boolean) => void;
     reorderable: boolean;
+    reorderDisabled: boolean;
     dropEdge: 'before' | 'after' | null;
     ondragstart: (event: DragEvent) => void;
     ondragend: () => void;
@@ -148,7 +150,7 @@
     {#if reorderable}<button
         class="drag-handle"
         draggable="true"
-        {disabled}
+        disabled={reorderDisabled}
         aria-label="Reorder note"
         title={`Drag to reorder · ${commandLabel} Up/Down`}
         onclick={onhandleselect}

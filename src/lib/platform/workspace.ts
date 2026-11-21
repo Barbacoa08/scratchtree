@@ -86,8 +86,11 @@ export interface RemoteRefresh {
   originEpoch: string;
 }
 export interface Repository {
+  /** Logical library binding after load, for workflows spanning multiple calls. */
+  readonly viewEpoch?: string | null;
   refreshFromRemote?(buffers: RemoteBuffer[]): Promise<RemoteRefresh>;
-  loadWorkspace(): Promise<WorkspaceSnapshot>;
+  /** An expected epoch reads the bound view without adopting a replacement. */
+  loadWorkspace(expectedEpoch?: string): Promise<WorkspaceSnapshot>;
   checkpointDraft(
     key: string,
     markdown: string,

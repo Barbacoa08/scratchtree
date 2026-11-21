@@ -515,8 +515,19 @@ export class DexieRepository implements Repository {
     this.boundEpoch = state.epoch;
     return state;
   }
-  loadWorkspace() {
-    return this.serial(async () => (await this.adoptRemote()).snapshot);
+  loadWorkspace(expectedEpoch?: string) {
+    return this.serial(async () => {
+      if (expectedEpoch === undefined)
+        return (await this.adoptRemote()).snapshot;
+      return this.db.transaction('r', this.tables(), async () => {
+        if (
+          this.boundEpoch !== expectedEpoch ||
+          (await this.db.libraries.get(this.libraryId))?.epoch !== expectedEpoch
+        )
+          throw replaced();
+        return (await this.read(expectedEpoch)).snapshot;
+      });
+    });
   }
   refreshFromRemote(buffers: RemoteBuffer[]): Promise<RemoteRefresh> {
     const captured = structuredClone(buffers);
