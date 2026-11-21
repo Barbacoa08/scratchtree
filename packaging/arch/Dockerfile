@@ -14,7 +14,7 @@ COPY --from=package /home/builder/package/ /package/
 RUN pacman -Syu --noconfirm && pacman -U --noconfirm /package/*.pkg.tar.zst && \
     pacman -Qkk scratchtree-preview && ldd /usr/bin/scratchtree-preview > /tmp/scratchtree-ldd && \
     cat /tmp/scratchtree-ldd && ! grep -F 'not found' /tmp/scratchtree-ldd
-RUN pacman -S --noconfirm --needed desktop-file-utils imagemagick openbox xclip xdotool xorg-server-xvfb xorg-xauth && \
+RUN pacman -S --noconfirm --needed desktop-file-utils diffutils imagemagick openbox xclip xdotool xorg-server-xvfb xorg-xauth && \
     useradd --create-home smoke
 COPY arch-preview.sh /usr/local/bin/arch-preview
 USER smoke

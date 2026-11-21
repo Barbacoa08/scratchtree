@@ -16,6 +16,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+command -v cmp
 pacman -Q scratchtree-preview gtk3 webkit2gtk-4.1
 desktop='/usr/share/applications/Scratchtree Preview.desktop'
 desktop-file-validate "$desktop"
