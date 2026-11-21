@@ -41,6 +41,9 @@
     oncopycode,
     onexpand,
     reorderable,
+    reorderDisabled,
+    dragDisabled,
+    selectionDisabled,
     dropEdge,
     ondragstart,
     ondragend,
@@ -82,6 +85,9 @@
     oncopycode: (code: string) => void;
     onexpand: (expanded: boolean) => void;
     reorderable: boolean;
+    reorderDisabled: boolean;
+    dragDisabled: boolean;
+    selectionDisabled: boolean;
     dropEdge: 'before' | 'after' | null;
     ondragstart: (event: DragEvent) => void;
     ondragend: () => void;
@@ -138,7 +144,7 @@
     <button
       class="note-select"
       aria-pressed={selected}
-      {disabled}
+      disabled={selectionDisabled}
       onclick={onselectbutton}
       aria-label={item.kind === 'tree' ? 'Select tree' : 'Select note'}
       title={item.kind === 'tree' ? 'Select tree' : 'Select note'}
@@ -147,10 +153,14 @@
     </button>
     {#if reorderable}<button
         class="drag-handle"
-        draggable="true"
-        {disabled}
+        draggable={!dragDisabled}
+        disabled={reorderDisabled}
         aria-label="Reorder note"
-        title={`Drag to reorder · ${commandLabel} Up/Down`}
+        title={reorderDisabled
+          ? undefined
+          : dragDisabled
+            ? `${commandLabel} Up/Down to reorder`
+            : `Drag to reorder · ${commandLabel} Up/Down`}
         onclick={onhandleselect}
         {ondragstart}
         {ondragend}

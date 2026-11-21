@@ -189,8 +189,13 @@ export class PersistentSession {
         ).apply(repo, captured);
       });
     };
+    const session = this;
     this.repository = {
+      get viewEpoch() {
+        return session.repo.viewEpoch;
+      },
       loadWorkspace: () => call('loadWorkspace'),
+      readBoundWorkspace: (epoch) => call('readBoundWorkspace', epoch),
       checkpointDraft: (...a) => call('checkpointDraft', ...a),
       discardDraft: (...a) => call('discardDraft', ...a),
       saveItemSource: (...a) => call('saveItemSource', ...a),

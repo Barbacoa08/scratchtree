@@ -309,15 +309,32 @@
       if (!palette?.pending) palette = null;
     });
   });
-  let scopes = $derived(scopeIndex(viewState.snapshot.items));
+  let savedSnapshot = $derived(viewState.snapshot);
+  let currentLocation = $derived(viewState.location);
+  let keyboardOrder = $derived.by(() => {
+    const captured = viewState.keyboardReorderLocation;
+    return captured?.scope === currentLocation.scope &&
+      captured.itemId === currentLocation.itemId
+      ? viewState.keyboardOrder
+      : null;
+  });
+  let projectedPositions = $derived(
+    keyboardOrder
+      ? new Map(keyboardOrder.map((id, position) => [id, position]))
+      : null,
+  );
+  let scopes = $derived(scopeIndex(savedSnapshot.items));
   let validVisit = $derived(
     historyLocationValidator(viewState.snapshot.items, scopes),
   );
   let hierarchy = $derived(
     createHierarchyPresentation(
-      viewState.snapshot.items.filter(
-        (x) => x.kind === 'tree' && scopes.get(x.id) === 'live',
-      ),
+      savedSnapshot.items
+        .filter((x) => x.kind === 'tree' && scopes.get(x.id) === 'live')
+        .map((tree) => {
+          const position = projectedPositions?.get(tree.id);
+          return position === undefined ? tree : { ...tree, position };
+        }),
     ),
   );
   let locationHierarchy = $derived(
@@ -345,6 +362,16 @@
   let editorStates = $state.raw(new Map<string, EditorState>());
   const focusRequestCleanups = new Set<() => void>();
   let disposed = false;
+  let savedSiblings = $derived(directEntries(savedSnapshot, currentLocation));
+  let siblingEntries = $derived.by(() => {
+    if (!keyboardOrder) return savedSiblings;
+    if (keyboardOrder.length !== savedSiblings.length) return savedSiblings;
+    const entries = new Map(savedSiblings.map((item) => [item.id, item]));
+    const projected = keyboardOrder.map((id) => entries.get(id));
+    return projected.every((item) => item !== undefined)
+      ? projected
+      : savedSiblings;
+  });
   let visibleNotes = $derived(
     viewState.query.trim()
       ? filterNotes(
@@ -352,7 +379,7 @@
           viewState.query,
           viewState.location.scope,
         )
-      : directEntries(viewState.snapshot, viewState.location),
+      : siblingEntries,
   );
   let activeNote = $derived(
     viewState.snapshot.items.find((n) => n.id === viewState.activeKey),
@@ -384,10 +411,17 @@
       authState.phase === 'signing-out' ||
       recoveryModal,
   );
-  let blocked = $derived(
+  let operationBlocked = $derived(
     webSuspended ||
       (viewState.operation !== null && viewState.operation !== 'save') ||
       modal,
+  );
+  let blocked = $derived(operationBlocked || keyboardOrder !== null);
+  let selectionBlocked = $derived(
+    operationBlocked ||
+      (keyboardOrder !== null &&
+        !viewState.query.trim() &&
+        !viewState.keyboardReorderError),
   );
   let navigationBlocked = $derived(
     webSuspended ||
@@ -404,12 +438,16 @@
     viewState.snapshot.items.find((n) => n.id === selected),
   );
   let showCommandHints = $derived(
-    commandHeld && viewState.loaded && !blocked && !palette,
+    commandHeld && viewState.loaded && !operationBlocked && !palette,
   );
   let streamCommandHint = $derived.by(() => {
-    const hints = [
-      browserBackup ? 'Space Write a note' : `${commandPrefix}N Write a note`,
-    ];
+    const hints = keyboardOrder
+      ? []
+      : [
+          browserBackup
+            ? 'Space Write a note'
+            : `${commandPrefix}N Write a note`,
+        ];
     const selectedVisible = shownEntries.some((x) => x.id === selected);
     const typing = isTyping(hintFocus);
     // Handles have their own Command-arrow binding; other controls use the
@@ -418,10 +456,13 @@
       hintFocus instanceof Element && hintFocus.closest('.drag-handle')
         ? hintFocus.closest('[data-entry-id]')?.getAttribute('data-entry-id')
         : null;
-    if (!hintTextSelected && !viewState.query.trim()) {
+    if (
+      !hintTextSelected &&
+      !viewState.query.trim() &&
+      !viewState.keyboardReorderError
+    ) {
       const id = handleId ?? (!typing && selectedVisible ? selected : null);
-      const siblings = directEntries(viewState.snapshot, viewState.location);
-      const before = siblings.map((item) => item.id);
+      const before = siblingEntries.map((item) => item.id);
       const ids = id
         ? selectedIds.has(id)
           ? before.filter((entry) => selectedIds.has(entry))
@@ -433,12 +474,15 @@
       const down = reorderSelected(before, ids, 1).some(
         (entry, index) => entry !== before[index],
       );
-      if (up || down)
+      if (
+        (up || down) &&
+        (!keyboardOrder || (id && viewState.keyboardReorderIds?.includes(id)))
+      )
         hints.push(
           `${commandPrefix}${up && down ? '↑/↓' : up ? '↑' : '↓'} Reorder`,
         );
     }
-    if (selectedVisible && !typing && !hintTextSelected)
+    if (!keyboardOrder && selectedVisible && !typing && !hintTextSelected)
       hints.push(
         viewState.location.scope === 'trash'
           ? `${commandPrefix}⌫ Permanently delete`
@@ -576,8 +620,8 @@
       const locationChanged =
         next.location.scope !== previous.location.scope ||
         next.location.itemId !== previous.location.itemId;
-      // Capture only acknowledged sibling-order changes before Svelte moves the
-      // existing keyed cards. Source saves and other snapshot changes only settle.
+      // Keyboard taps capture their own projected motion. Drag and M still
+      // animate the acknowledged order before Svelte moves the keyed cards.
       if (
         locationChanged ||
         next.query !== previous.query ||
@@ -585,7 +629,17 @@
         next.buffers !== previous.buffers
       )
         reorderMotion?.cancel();
-      if (next.snapshot !== previous.snapshot) {
+      if (
+        previous.keyboardOrder &&
+        !next.keyboardOrder &&
+        next.keyboardReorderError
+      )
+        reorderMotion?.cancel();
+      if (
+        next.snapshot !== previous.snapshot &&
+        next.keyboardOrder === null &&
+        previous.keyboardOrder === null
+      ) {
         const before = directEntries(previous.snapshot, previous.location);
         const after = directEntries(next.snapshot, next.location);
         const old = new Map(before.map((item) => [item.id, item]));
@@ -917,7 +971,7 @@
   }
   function cardClick(event: MouseEvent, id: string) {
     if (
-      blocked ||
+      selectionBlocked ||
       (event.target as Element).closest(
         'a,button,input,textarea,[contenteditable="true"]',
       ) ||
@@ -929,7 +983,7 @@
   function selectionPointer(event: PointerEvent) {
     if (
       (primaryModifier(event) || event.shiftKey) &&
-      !blocked &&
+      !selectionBlocked &&
       (!(event.target as Element).closest('button') ||
         !!(event.target as Element).closest('.note-select,.drag-handle')) &&
       !(event.target as Element).closest(
@@ -940,11 +994,9 @@
       event.preventDefault();
   }
   function selectCard(event: MouseEvent, id: string) {
-    if (blocked) return;
+    if (selectionBlocked) return;
     ++interaction;
-    const siblings = directEntries(viewState.snapshot, viewState.location).map(
-      (entry) => entry.id,
-    );
+    const siblings = siblingEntries.map((entry) => entry.id);
     mouseSelection =
       viewState.query.trim() || !siblings.includes(id)
         ? { ids: [id], primary: id, anchor: id }
@@ -1023,6 +1075,30 @@
       if (focus.mayRestore()) stream?.focus();
     } finally {
       focus.stop();
+    }
+  }
+  let retryingKeyboardReorder = $state(false);
+  async function retryKeyboardReorder() {
+    if (operationBlocked || retryingKeyboardReorder) return;
+    const focus = observeSubmissionFocus();
+    const intent = interaction;
+    const origin = controller.state.location;
+    const query = controller.state.query;
+    retryingKeyboardReorder = true;
+    try {
+      if (!(await controller.flush())) return;
+      await tick();
+      if (
+        interaction === intent &&
+        controller.state.location === origin &&
+        controller.state.query === query &&
+        focus.mayRestore() &&
+        document.activeElement === document.body
+      )
+        stream?.focus();
+    } finally {
+      focus.stop();
+      retryingKeyboardReorder = false;
     }
   }
   async function retryAction() {
@@ -1272,7 +1348,7 @@
   }
   function selectedGroup(id: string) {
     return selectedIds.has(id)
-      ? directEntries(controller.state.snapshot, controller.state.location)
+      ? siblingEntries
           .filter((item) => selectedIds.has(item.id))
           .map((item) => item.id)
       : [id];
@@ -1465,7 +1541,7 @@
     session.request = request;
     void executeMove(request, session.primary, session);
   }
-  function moveKey(event: KeyboardEvent, id: string) {
+  async function moveKey(event: KeyboardEvent, id: string) {
     if (
       !primaryModifier(event) ||
       event.altKey ||
@@ -1474,7 +1550,8 @@
       event.repeat ||
       event.isComposing ||
       event.defaultPrevented ||
-      blocked ||
+      operationBlocked ||
+      palette ||
       window.getSelection()?.toString() ||
       !['ArrowUp', 'ArrowDown'].includes(event.key)
     )
@@ -1487,28 +1564,39 @@
       );
       return;
     }
-    const siblings = directEntries(
-      controller.state.snapshot,
-      controller.state.location,
-    );
-    const ids = selectedGroup(id),
-      before = siblings.map((item) => item.id);
-    const after = reorderSelected(
-      before,
+    const ids = selectedGroup(id);
+    const order = controller.stageKeyboardReorder(
       ids,
       event.key === 'ArrowUp' ? -1 : 1,
     );
-    if (after.every((item, index) => item === before[index])) return;
+    if (!order) return;
+    const intent = ++interaction;
+    const location = controller.state.location;
+    const original = document.activeElement;
+    const focus = observeSubmissionFocus();
     try {
-      void executeMove(
-        controller.captureReorder(ids, after),
-        selectedIds.has(id) ? selected : id,
-      );
-    } catch {
-      controller.feedback(
-        '',
-        'These notes can no longer be reordered together.',
-      );
+      if (!selectedIds.has(id)) setSelected(id);
+      selection.remember(location, selected);
+      reorderMotion?.reorder(order);
+      await tick();
+      if (
+        interaction !== intent ||
+        controller.state.location !== location ||
+        controller.state.query.trim() ||
+        !focus.mayRestore()
+      )
+        return;
+      scrollSelection();
+      // Keyed DOM moves may blur a focused grip. Leave any later focus alone.
+      if (
+        original instanceof HTMLButtonElement &&
+        original.classList.contains('drag-handle') &&
+        original.isConnected &&
+        document.activeElement === document.body
+      )
+        original.focus({ preventScroll: true });
+    } finally {
+      focus.stop();
     }
   }
   function startDrag(event: DragEvent, id: string) {
@@ -1618,7 +1706,8 @@
       event.defaultPrevented ||
       event.isComposing ||
       !viewState.loaded ||
-      (blocked && !(/^[1-9]$/.test(event.key) && !navigationBlocked)) ||
+      (operationBlocked &&
+        !(/^[1-9]$/.test(event.key) && !navigationBlocked)) ||
       palette ||
       !primaryModifier(event) ||
       event.altKey ||
@@ -1647,16 +1736,25 @@
       palette ||
       event.defaultPrevented ||
       !viewState.loaded ||
-      (blocked &&
-        (navigationBlocked ||
-          !['arrowleft', 'arrowright', 'enter'].includes(
-            event.key.toLowerCase(),
-          ))) ||
       event.altKey ||
       secondaryModifier(event)
     )
       return;
     const key = event.key.toLowerCase();
+    if (
+      primaryModifier(event) &&
+      !event.shiftKey &&
+      (key === 'arrowup' || key === 'arrowdown') &&
+      !isTyping(event.target)
+    ) {
+      void moveKey(event, selected);
+      return;
+    }
+    if (
+      blocked &&
+      (navigationBlocked || !['arrowleft', 'arrowright', 'enter'].includes(key))
+    )
+      return;
     if (event.shiftKey) {
       if (
         !primaryModifier(event) &&
@@ -1682,12 +1780,7 @@
       return;
     }
     if (primaryModifier(event)) {
-      if (
-        (key === 'arrowup' || key === 'arrowdown') &&
-        !isTyping(event.target)
-      ) {
-        moveKey(event, selected);
-      } else if (key === 'n') {
+      if (key === 'n') {
         event.preventDefault();
         void writeNote();
       } else if (key === 'f') {
@@ -1881,6 +1974,7 @@
     class:compact
     class:sr-only={compact &&
       !viewState.error &&
+      !viewState.keyboardReorderError &&
       !viewState.completionRetry &&
       !viewState.mutationRetry &&
       !compactSync}
@@ -1904,9 +1998,13 @@
         onmodalchange={(active) => (recoveryModal = active)}
       />{/if}
     <p class:sr-only={compact} role="status" aria-live="polite">
-      {viewState.status}
+      {keyboardOrder &&
+      !viewState.query.trim() &&
+      !viewState.keyboardReorderError
+        ? 'Order unsaved'
+        : viewState.status}
     </p>
-    <p role="alert">{viewState.error}</p>
+    <p role="alert">{viewState.keyboardReorderError || viewState.error}</p>
     {#if paletteRetry && viewState.mutationRetry && paletteRetry.epoch === workspaceEpoch && paletteRetry.identity === controller.mutationRetryIdentity}
       <p role="status">
         Retry color: {paletteRetry.color
@@ -1914,7 +2012,18 @@
           : 'Reset'} for {paletteRetry.label}.
       </p>
     {/if}
-    {#if viewState.completionRetry}<button
+    {#if viewState.keyboardReorderError}
+      {#if keyboardOrder}<button
+          disabled={operationBlocked}
+          aria-disabled={retryingKeyboardReorder}
+          onclick={() => void retryKeyboardReorder()}>Retry reorder</button
+        >
+      {:else}<button
+          disabled={operationBlocked}
+          onclick={() => controller.dismissKeyboardReorderConflict()}
+          >Dismiss reorder conflict</button
+        >{/if}
+    {:else if viewState.completionRetry}<button
         disabled={blocked}
         onclick={() => controller.retryCompletion()}>Retry completion</button
       >
@@ -2054,14 +2163,16 @@
           >
           {#if browserBackup}<BrowserBackupActions
               backup={browserBackup}
-              {blocked}
+              blocked={operationBlocked}
               {controller}
             />{:else}<button
               onclick={() => controller.export()}
-              disabled={blocked}><Icon name="upload" /> Export backup</button
+              disabled={operationBlocked}
+              ><Icon name="upload" /> Export backup</button
             ><button
               onclick={() => controller.previewRestore()}
-              disabled={blocked}><Icon name="download" /> Restore backup</button
+              disabled={operationBlocked}
+              ><Icon name="download" /> Restore backup</button
             >{/if}<button
             onclick={() => void undoDelete()}
             disabled={!viewState.snapshot.undoDeleteIds.length ||
@@ -2081,7 +2192,7 @@
               disabled={!auth ||
                 !authState.configured ||
                 authState.phase === 'signing-out' ||
-                blocked}
+                operationBlocked}
               data-unavailable={!auth || !authState.configured ? '' : undefined}
               title={!auth || !authState.configured
                 ? 'Sign in is not configured'
@@ -2091,7 +2202,7 @@
                 : undefined}
               onclick={() => {
                 if (
-                  blocked ||
+                  operationBlocked ||
                   !auth ||
                   !authState.configured ||
                   authState.phase === 'signing-out'
@@ -2113,7 +2224,7 @@
               <button
                 type="button"
                 bind:this={signOutRetry}
-                disabled={blocked}
+                disabled={operationBlocked}
                 onclick={() => void auth?.signOut()}>Retry sign out</button
               >
             {/if}
@@ -2157,6 +2268,12 @@
               bind:this={noteBodies[entry.id]}
               item={entry}
               reorderable={!viewState.query.trim()}
+              reorderDisabled={operationBlocked ||
+                (keyboardOrder !== null &&
+                  (!viewState.keyboardReorderIds?.includes(entry.id) ||
+                    !!viewState.keyboardReorderError))}
+              dragDisabled={keyboardOrder !== null}
+              selectionDisabled={selectionBlocked}
               dropEdge={dragGuide?.id === entry.id ? dragGuide.edge : null}
               ondragstart={(event) => startDrag(event, entry.id)}
               ondragend={clearDrag}
