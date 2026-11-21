@@ -4,8 +4,9 @@
   import MarkdownEditor from './MarkdownEditor.svelte';
   import MarkdownView from './MarkdownView.svelte';
   import {
-    exceedsPreviewLines,
+    countRenderedRows,
     firstPreviewLine,
+    hasMultipleEditorRows,
   } from '../workspace/rendered-lines';
   import { firstLineCenter } from '../workspace/first-line';
   let {
@@ -27,10 +28,12 @@
     expanded,
     onexpand,
     onfirstline,
+    onmarkerlayout,
   }: {
     expanded: boolean;
     onexpand: (expanded: boolean) => void;
     onfirstline: (center: number | undefined) => void;
+    onmarkerlayout?: (multiline: boolean, bottom: number) => void;
     id: string;
     markdown: string;
     source: string;
@@ -88,6 +91,7 @@
   });
   function measure() {
     if (!body) return;
+    const bodyRect = body.getBoundingClientRect();
     const content = editing
       ? body.querySelector<HTMLElement>('.cm-content')
       : rendered?.querySelector<HTMLElement>('.markdown-view');
@@ -111,7 +115,7 @@
               body.scrollTop +
               editScroll +
               center -
-              body.getBoundingClientRect().top,
+              bodyRect.top,
       );
     }
     const nextCap =
@@ -125,7 +129,8 @@
       const first = firstPreviewLine(rendered);
       firstLineHeight = first.height;
       firstLineOffset = first.offset;
-      overflow = content ? exceedsPreviewLines(content) : false;
+      const rows = content ? countRenderedRows(content) : 0;
+      overflow = rows > 5;
       if (!overflow && expanded) onexpand(false);
       // Match the text slice even before its collapse transform has settled.
       const previewTop = rendered.getBoundingClientRect().top + first.offset;
@@ -139,9 +144,34 @@
           !expanded &&
           (rect.bottom <= previewTop || rect.top >= previewBottom);
       }
-    } else if (changed) {
-      overflow = naturalHeight > lineHeight * 5 + 1;
-    } else overflow = savedOverflow;
+      onmarkerlayout?.(
+        (!overflow || expanded) && rows > 1,
+        body.offsetTop + bodyRect.height,
+      );
+    } else if (editing) {
+      overflow = changed ? naturalHeight > lineHeight * 5 + 1 : savedOverflow;
+      measureEditorMarker(content, bodyRect);
+    }
+  }
+  function measureEditorMarker(
+    content: HTMLElement | null | undefined,
+    bodyRect: DOMRect,
+  ) {
+    onmarkerlayout?.(
+      !!content && hasMultipleEditorRows(content, bodyRect),
+      body.offsetTop + bodyRect.height,
+    );
+  }
+  function onEditorScroll(event: Event) {
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      target.classList.contains('cm-scroller')
+    )
+      measureEditorMarker(
+        target.querySelector<HTMLElement>('.cm-content'),
+        body.getBoundingClientRect(),
+      );
   }
   $effect(() => {
     const node = rendered;
@@ -167,7 +197,7 @@
       // It never uses the taller raw editor source as the entry footprint.
       const minimum = parseFloat(getComputedStyle(body).minHeight);
       const rendered = node!.querySelector<HTMLElement>('.markdown-view');
-      savedOverflow = rendered ? exceedsPreviewLines(rendered) : false;
+      savedOverflow = !!rendered && countRenderedRows(rendered) > 5;
       firstLineHeight = firstPreviewLine(node!).height;
       savedBaseline =
         savedOverflow && !expanded
@@ -214,6 +244,7 @@
   style:--preview-line={`${firstLineHeight}px`}
   style:--preview-offset={`${firstLineOffset}px`}
   bind:this={body}
+  onscrollcapture={editing && onmarkerlayout ? onEditorScroll : undefined}
   style:height={height === undefined ? undefined : `${height}px`}
 >
   {#if editing}
