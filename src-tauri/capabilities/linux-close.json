@@ -1,0 +1,6 @@
+{
+  "identifier": "linux-close",
+  "platforms": ["linux"],
+  "windows": ["main"],
+  "permissions": ["core:window:allow-destroy"]
+}
