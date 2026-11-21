@@ -337,27 +337,22 @@
   const focusRequestCleanups = new Set<() => void>();
   let disposed = false;
   let visibleNotes = $derived(
-    filterNotes(
-      viewState.snapshot.items,
-      viewState.query,
-      viewState.location.scope,
-    ).filter((n) => viewState.query.trim() || n.parentId === viewState.ownerId),
+    viewState.query.trim()
+      ? filterNotes(
+          viewState.snapshot.items,
+          viewState.query,
+          viewState.location.scope,
+        )
+      : directEntries(viewState.snapshot, viewState.location),
   );
   let activeNote = $derived(
     viewState.snapshot.items.find((n) => n.id === viewState.activeKey),
   );
-  let shownNotes = $derived(
+  let shownEntries = $derived(
     activeNote && !visibleNotes.some((n) => n.id === activeNote!.id)
       ? [activeNote, ...visibleNotes]
       : visibleNotes,
   );
-  let shownEntries = $derived.by(() => {
-    if (viewState.query.trim()) return shownNotes;
-    const entries = directEntries(viewState.snapshot, viewState.location);
-    return activeNote && !entries.some((x) => x.id === activeNote.id)
-      ? [activeNote, ...entries]
-      : entries;
-  });
   $effect(() => {
     void metadataView;
     untrack(() => {
