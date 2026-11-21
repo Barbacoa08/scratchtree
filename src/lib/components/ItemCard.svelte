@@ -90,6 +90,8 @@
   } = $props();
   let body = $state<NoteBody>();
   let lineCenter = $state<number>();
+  let multiline = $state(false);
+  let markerBottom = $state(0);
   let updated = $derived(timestampPresentation(item.updatedAt));
   export function toggleExpanded() {
     return body?.toggleExpanded() ?? false;
@@ -118,11 +120,18 @@
     ? undefined
     : `${lineCenter}px`}
   data-kind={item.kind}
+  data-colored={!!item.color}
   data-entry-id={item.id}
   onclick={onselect}
   onpointerdown={onselectionpointer}
   ondblclick={ondoubleclick}
 >
+  {#if item.color}<span
+      class="note-color"
+      class:multiline
+      style:--item-color-bottom={`${markerBottom}px`}
+      aria-hidden="true"
+    ></span>{/if}
   <div class="item-slot">
     <button
       class="note-select"
@@ -131,14 +140,9 @@
       onclick={onselectbutton}
       aria-label={item.kind === 'tree' ? 'Select tree' : 'Select note'}
       title={item.kind === 'tree' ? 'Select tree' : 'Select note'}
-      >{#if item.kind === 'tree'}<TreeIcon
-          color={item.color}
-        />{:else if item.color}<span
-          class="note-color"
-          style:background={markerColors[item.color]}
-          aria-hidden="true"
-        ></span>{/if}</button
     >
+      {#if item.kind === 'tree'}<TreeIcon />{/if}
+    </button>
     {#if reorderable}<button
         class="drag-handle"
         draggable="true"
@@ -221,6 +225,12 @@
   <NoteBody
     bind:this={body}
     onfirstline={(center) => (lineCenter = center)}
+    onmarkerlayout={item.color
+      ? (value, bottom) => {
+          multiline = value;
+          markerBottom = bottom;
+        }
+      : undefined}
     {expanded}
     {onexpand}
     id={item.id}

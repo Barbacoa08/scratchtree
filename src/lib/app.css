@@ -1301,12 +1301,35 @@ kbd {
   top: 1rem;
 }
 
-/* One fixed slot: pointer hover swaps tree/marker for grip without moving source. */
+/* The color line stays in the gutter while icons share the first-line slot. */
 .note-color {
-  display: inline-block;
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 1px;
+  position: absolute;
+  inset: var(--item-color-start, 0.375rem) auto auto 0.59375rem;
+  height: max(
+    0px,
+    calc(var(--item-color-bottom) - var(--item-color-start, 0.375rem))
+  );
+  width: 0.1875rem;
+  border-radius: 0.09375rem;
+  background: var(--item-marker-color);
+  pointer-events: none;
+}
+.note-card[data-colored='true'] {
+  --item-marker-color: var(--selection-color);
+}
+html[data-theme='light'] .note-card[data-colored='true'] {
+  --item-marker-color: color-mix(in srgb, var(--selection-color) 68%, #111);
+}
+.note-card[data-kind='tree'],
+.note-card:has(.drag-handle):hover,
+.note-card[data-kind='note']:has(.drag-handle):is(.selected, :focus-within) {
+  --item-color-start: calc(var(--item-line-center, 1rem) + 0.625rem);
+}
+.note-card[data-kind='tree'] > .note-color:not(.multiline),
+.note-card:has(.drag-handle):hover > .note-color:not(.multiline),
+.note-card[data-kind='note']:has(.drag-handle):is(.selected, :focus-within)
+  > .note-color:not(.multiline) {
+  display: none;
 }
 .note-card {
   padding-left: 2.25rem;
@@ -1351,6 +1374,13 @@ kbd {
   stroke: currentColor;
   stroke-width: 2.5;
   stroke-linecap: round;
+}
+.note-card[data-colored='true'] .item-slot :is(.note-select, .drag-handle) {
+  color: var(--item-marker-color);
+}
+/* Shift the drawings within the shared hit area. */
+.note-card[data-colored='true'] .item-slot svg {
+  transform: translateX(-0.4375rem);
 }
 .drag-handle span {
   pointer-events: none;
@@ -1397,9 +1427,6 @@ kbd {
 }
 .item-slot .note-select:focus-visible {
   opacity: 1 !important;
-}
-.item-slot .note-select:focus-visible .note-color {
-  visibility: hidden;
 }
 /* Keyboard reorder keeps a tree's icon; its focus ring identifies the action. */
 .note-card[data-kind='tree']:not(:hover) .drag-handle span {

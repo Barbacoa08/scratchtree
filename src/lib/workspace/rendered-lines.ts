@@ -1,5 +1,9 @@
-/** Count rendered text rows, ignoring paragraph spacing and code-copy controls. */
-export function exceedsPreviewLines(content: HTMLElement, limit = 5): boolean {
+/** Count up to the requested number of rendered rows, ignoring spacing and controls. */
+export function countRenderedRows(
+  content: HTMLElement,
+  maxRows = 6,
+  viewport?: Pick<DOMRect, 'top' | 'bottom'>,
+): number {
   const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
   let count = 0;
   let bottom = -Infinity;
@@ -9,7 +13,7 @@ export function exceedsPreviewLines(content: HTMLElement, limit = 5): boolean {
     if (
       !parent ||
       parent.closest('button,.sr-only') ||
-      !node.textContent?.trim()
+      (!viewport && !node.textContent?.trim())
     ) {
       // A blank code row still occupies one visible line.
       if (!parent?.classList.contains('code-line') || node.textContent !== ' ')
@@ -19,11 +23,34 @@ export function exceedsPreviewLines(content: HTMLElement, limit = 5): boolean {
     range.selectNodeContents(node);
     for (const rect of range.getClientRects()) {
       if (!rect.width || !rect.height) continue;
+      if (
+        viewport &&
+        (rect.bottom <= viewport.top + 1 || rect.top >= viewport.bottom - 1)
+      )
+        continue;
       if (rect.top >= bottom - 1) {
-        if (++count > limit) return true;
+        if (++count >= maxRows) return count;
         bottom = rect.bottom;
       } else bottom = Math.max(bottom, rect.bottom);
     }
+  }
+  return count;
+}
+
+/** CodeMirror line boxes account for blank source rows as well as wrapped text. */
+export function hasMultipleEditorRows(
+  content: HTMLElement,
+  viewport: DOMRect,
+): boolean {
+  let sawRow = false;
+  for (const line of content.children) {
+    if (!(line instanceof HTMLElement) || !line.classList.contains('cm-line'))
+      continue;
+    const rect = line.getBoundingClientRect();
+    if (rect.top >= viewport.bottom - 1) break;
+    if (rect.bottom <= viewport.top + 1) continue;
+    if (sawRow || countRenderedRows(line, 2, viewport) > 1) return true;
+    sawRow = true;
   }
   return false;
 }
