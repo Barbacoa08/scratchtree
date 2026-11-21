@@ -21,3 +21,5 @@ playwright-report/
 website/dist/
 
 src-tauri/gen/
+
+public-web-dist/

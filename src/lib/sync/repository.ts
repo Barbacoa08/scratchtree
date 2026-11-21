@@ -1426,6 +1426,7 @@ export class DexieRepository implements Repository {
         trees: backup.library.items.filter((x) => x.kind === 'tree').length,
         drafts: backup.device.drafts.length,
         warning:
+          this.files.restoreWarning ??
           'This replaces the shared notes on every device. Current local work is retained for recovery.',
       };
     });

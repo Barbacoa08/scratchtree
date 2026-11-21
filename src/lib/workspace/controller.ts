@@ -1455,14 +1455,14 @@ export class WorkspaceController {
     );
   }
 
-  export() {
+  export(successStatus = 'Backup exported') {
     return this.run(async () => {
       if (!(await this.checkpoint())) return false;
       this.patch({ operation: 'export' });
       try {
         const path = await this.repo.exportBackup();
         this.patch({
-          status: path ? 'Backup exported' : 'Export cancelled',
+          status: path ? successStatus : 'Export cancelled',
           error: '',
         });
         return true;

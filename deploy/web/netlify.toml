@@ -1,0 +1,14 @@
+# In site settings select deploy/web as the package directory and the repository root as the base.
+[build]
+  command = "pnpm build:public-web"
+  publish = "public-web-dist"
+
+[build.environment]
+  NODE_VERSION = "24.21.0"
+  PNPM_VERSION = "12.4.1"
+
+[build.processing.html]
+  pretty_urls = false
+
+[functions]
+  directory = "deploy/web/functions"

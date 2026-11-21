@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
   import type { ColorToken, Location } from '../domain/notes';
+  import type { Snippet } from 'svelte';
+  import BrowserBackupActions from './BrowserBackupActions.svelte';
+  import type { BrowserBackupFiles } from '../platform/browser-backup-files';
   import type { EditorState } from '@codemirror/state';
   import { isTauri } from '@tauri-apps/api/core';
   import MarkdownEditor from './MarkdownEditor.svelte';
@@ -60,6 +63,9 @@
     sync,
     onready,
     windowAdapter,
+    browserBackup,
+    webActions,
+    webSuspended = false,
     appearance = 'system',
     onappearancechange = () => {},
   }: {
@@ -67,6 +73,9 @@
     auth?: AuthPort;
     sync?: SyncPort;
     windowAdapter?: CloseAdapter;
+    browserBackup?: BrowserBackupFiles;
+    webActions?: Snippet;
+    webSuspended?: boolean;
     appearance?: AppearancePreference;
     onappearancechange?: (preference: AppearancePreference) => void;
     onready?: (controller: WorkspaceController) => void;
@@ -376,15 +385,20 @@
       recoveryModal,
   );
   let blocked = $derived(
-    (viewState.operation !== null && viewState.operation !== 'save') || modal,
+    webSuspended ||
+      (viewState.operation !== null && viewState.operation !== 'save') ||
+      modal,
   );
   let navigationBlocked = $derived(
-    modal ||
+    webSuspended ||
+      modal ||
       (viewState.operation !== null &&
         !['save', 'navigate', 'promote'].includes(viewState.operation)),
   );
   let editorReadOnly = $derived(
-    modal || (viewState.operation !== null && viewState.operation !== 'save'),
+    webSuspended ||
+      modal ||
+      (viewState.operation !== null && viewState.operation !== 'save'),
   );
   let selectedNote = $derived(
     viewState.snapshot.items.find((n) => n.id === selected),
@@ -393,7 +407,9 @@
     commandHeld && viewState.loaded && !blocked && !palette,
   );
   let streamCommandHint = $derived.by(() => {
-    const hints = [`${commandPrefix}N Write a note`];
+    const hints = [
+      browserBackup ? 'Space Write a note' : `${commandPrefix}N Write a note`,
+    ];
     const selectedVisible = shownEntries.some((x) => x.id === selected);
     const typing = isTyping(hintFocus);
     // Handles have their own Command-arrow binding; other controls use the
@@ -1615,7 +1631,7 @@
       event.stopPropagation();
       search?.focus();
       void controller.flush();
-    } else if (/^[1-9]$/.test(event.key)) {
+    } else if (!browserBackup && /^[1-9]$/.test(event.key)) {
       event.preventDefault();
       event.stopPropagation();
       if (event.key === '1') void openTree(null);
@@ -1874,9 +1890,11 @@
     {#if !compact}<p>
         {authState.authenticated
           ? 'Local saves and cloud sync.'
-          : linuxDesktop
-            ? 'Notes and drafts on this device.'
-            : 'Notes and drafts on this Mac.'}
+          : browserBackup
+            ? 'Notes and drafts are saved in this browser. Export a backup before clearing site data.'
+            : linuxDesktop
+              ? 'Notes and drafts on this device.'
+              : 'Notes and drafts on this Mac.'}
       </p>{/if}
     {#if sync && (!compact || compactSync)}<SyncStatus
         {sync}
@@ -1913,6 +1931,7 @@
   </section>
 {/snippet}
 <main
+  inert={webSuspended}
   class:native-chrome={nativeChrome}
   class:color-save-pending={viewState.operation === 'color' && !modal}
 >
@@ -2013,14 +2032,14 @@
         <div class="navigation-hint-anchor">
           <TreeSidebar
             presentation={hierarchy}
-            {showCommandHints}
+            showCommandHints={showCommandHints && !browserBackup}
             {commandPrefix}
             currentId={viewState.ownerId}
             live={viewState.location.scope === 'live'}
             disabled={navigationBlocked}
             onopen={(id) => void openTree(id)}
           />
-          {#if showCommandHints}<span
+          {#if showCommandHints && !browserBackup}<span
               class="command-hint home-command-hint"
               aria-hidden="true">{commandPrefix}1</span
             >{/if}
@@ -2033,12 +2052,17 @@
               : undefined}
             disabled={navigationBlocked}><Icon name="trash" /> Trash</button
           >
-          <button onclick={() => controller.export()} disabled={blocked}
-            ><Icon name="upload" /> Export backup</button
-          ><button
-            onclick={() => controller.previewRestore()}
-            disabled={blocked}><Icon name="download" /> Restore backup</button
-          ><button
+          {#if browserBackup}<BrowserBackupActions
+              backup={browserBackup}
+              {blocked}
+              {controller}
+            />{:else}<button
+              onclick={() => controller.export()}
+              disabled={blocked}><Icon name="upload" /> Export backup</button
+            ><button
+              onclick={() => controller.previewRestore()}
+              disabled={blocked}><Icon name="download" /> Restore backup</button
+            >{/if}<button
             onclick={() => void undoDelete()}
             disabled={!viewState.snapshot.undoDeleteIds.length ||
               undoPending ||
@@ -2049,52 +2073,59 @@
               : undefined}><Icon name="undo" /> Undo delete</button
           >
         </div>
-        <div class="auth-footer">
-          <button
-            bind:this={authTrigger}
-            disabled={!auth ||
-              !authState.configured ||
-              authState.phase === 'signing-out' ||
-              blocked}
-            data-unavailable={!auth || !authState.configured ? '' : undefined}
-            title={!auth || !authState.configured
-              ? 'Sign in is not configured'
-              : undefined}
-            aria-describedby={!auth || !authState.configured
-              ? 'auth-unavailable'
-              : undefined}
-            onclick={() => {
-              if (
-                blocked ||
-                !auth ||
-                !authState.configured ||
-                authState.phase === 'signing-out'
-              )
-                return;
-              if (authState.authenticated) void auth.signOut();
-              else auth.showSignIn();
-            }}
-            ><Icon name="account" />
-            {authState.authenticated ? 'Sign out' : 'Sign in / sign up'}</button
-          >
-          {#if authState.phase === 'signing-out'}
-            <p role="status">Signing out…</p>
-          {/if}
-          {#if signOutError && !authState.open}
-            <p role="alert">{signOutError}</p>
+        {#if webActions}<div class="auth-footer">
+            {@render webActions()}
+          </div>{:else}<div class="auth-footer">
             <button
-              type="button"
-              bind:this={signOutRetry}
-              disabled={blocked}
-              onclick={() => void auth?.signOut()}>Retry sign out</button
+              bind:this={authTrigger}
+              disabled={!auth ||
+                !authState.configured ||
+                authState.phase === 'signing-out' ||
+                blocked}
+              data-unavailable={!auth || !authState.configured ? '' : undefined}
+              title={!auth || !authState.configured
+                ? 'Sign in is not configured'
+                : undefined}
+              aria-describedby={!auth || !authState.configured
+                ? 'auth-unavailable'
+                : undefined}
+              onclick={() => {
+                if (
+                  blocked ||
+                  !auth ||
+                  !authState.configured ||
+                  authState.phase === 'signing-out'
+                )
+                  return;
+                if (authState.authenticated) void auth.signOut();
+                else auth.showSignIn();
+              }}
+              ><Icon name="account" />
+              {authState.authenticated
+                ? 'Sign out'
+                : 'Sign in / sign up'}</button
             >
-          {/if}
-          {#if !auth || !authState.configured}<span
-              id="auth-unavailable"
-              class="auth-unavailable">Sign in is not configured.</span
-            >{/if}
-        </div>
-        <ThemeSelector preference={appearance} onchange={onappearancechange} />
+            {#if authState.phase === 'signing-out'}
+              <p role="status">Signing out…</p>
+            {/if}
+            {#if signOutError && !authState.open}
+              <p role="alert">{signOutError}</p>
+              <button
+                type="button"
+                bind:this={signOutRetry}
+                disabled={blocked}
+                onclick={() => void auth?.signOut()}>Retry sign out</button
+              >
+            {/if}
+            {#if !auth || !authState.configured}<span
+                id="auth-unavailable"
+                class="auth-unavailable">Sign in is not configured.</span
+              >{/if}
+          </div>
+        {/if}<ThemeSelector
+          preference={appearance}
+          onchange={onappearancechange}
+        />
       </aside>
       <section class="notes-column" aria-label="Notes editor">
         <div class="stream-header">
@@ -2265,9 +2296,11 @@
           <h2>Details and shortcuts</h2>
           <p>
             {visibleNotes.length}
-            {visibleNotes.length === 1 ? 'note' : 'notes'} · {linuxDesktop
-              ? 'On this device'
-              : 'On this Mac'}
+            {visibleNotes.length === 1 ? 'note' : 'notes'} · {browserBackup
+              ? 'In this browser'
+              : linuxDesktop
+                ? 'On this device'
+                : 'On this Mac'}
           </p>
           {#if selectedNote}{@const created = timestampPresentation(
               selectedNote.createdAt,
@@ -2319,16 +2352,17 @@
             </section>
           {/if}
           <div class="shortcut-list" aria-label="Keyboard shortcuts">
-            <div>
-              <span>Write a note in selection</span><span class="shortcut-keys"
-                ><kbd>{commandGlyph}</kbd><kbd>N</kbd></span
-              >
-            </div>
-            <div>
-              <span>Root</span><span class="shortcut-keys"
-                ><kbd>{commandGlyph}</kbd><kbd>1</kbd></span
-              >
-            </div>
+            {#if !browserBackup}<div>
+                <span>Write a note in selection</span><span
+                  class="shortcut-keys"
+                  ><kbd>{commandGlyph}</kbd><kbd>N</kbd></span
+                >
+              </div>
+              <div>
+                <span>Root</span><span class="shortcut-keys"
+                  ><kbd>{commandGlyph}</kbd><kbd>1</kbd></span
+                >
+              </div>{/if}
             <div>
               <span>Bold / Italic</span><span class="shortcut-keys"
                 ><kbd>{commandGlyph}</kbd><kbd>B</kbd><span>/</span><kbd
@@ -2339,7 +2373,9 @@
             <div><span>Write a note</span><kbd>Space</kbd></div>
             <div>
               <span aria-hidden="true">Search</span><span class="sr-only"
-                >Search: {commandLabel} slash, {commandLabel} F, or slash</span
+                >{browserBackup
+                  ? 'Search saved notes'
+                  : `Search: ${commandLabel} slash, ${commandLabel} F, or slash`}</span
               ><span class="shortcut-keys" aria-hidden="true"
                 ><kbd>{commandGlyph}</kbd><kbd>/</kbd><span aria-hidden="true"
                   >/</span
