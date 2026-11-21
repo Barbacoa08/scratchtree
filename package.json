@@ -10,11 +10,13 @@
     "format": "prettier --write .",
     "test:unit": "vitest run",
     "test:browser": "playwright test",
+    "test:public-web": "playwright test -c playwright.public-web.config.ts",
     "build:web": "vite build",
+    "build:public-web": "vite build --mode public-web && node scripts/build-public-web.mjs",
     "build:site": "node website/build.mjs",
     "tauri:dev": "tauri dev --config src-tauri/tauri.preview.conf.json",
     "tauri:build": "tauri build --bundles app --target aarch64-apple-darwin",
-    "verify": "pnpm check && pnpm test:unit && pnpm test:browser && pnpm build:web && pnpm build:site && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
+    "verify": "pnpm check && pnpm test:unit && pnpm test:browser && pnpm build:public-web && pnpm test:public-web && pnpm build:web && pnpm build:site && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri:preview": "tauri build --bundles app --target aarch64-apple-darwin --config src-tauri/tauri.preview.conf.json"
   },
   "dependencies": {
@@ -52,6 +54,7 @@
     "vitest": "5.1.0"
   },
   "imports": {
-    "#lib/*": "./src/lib/*"
+    "#lib/*": "./src/lib/*",
+    "#workspace-entry": "./src/routes/NativeWorkspace.svelte"
   }
 }
