@@ -76,7 +76,7 @@ Paste this Markdown into the composer at the bottom, then press Enter to save.
 - Select a note and press E or double-click to edit it. Press Enter outside fenced code or Escape to finish editing and keep changes.
 - Press Command+N to write inside the selected note, or write here when nothing is selected. Enter/Right opens a selected item. Use the breadcrumb, Back/Forward controls, or mouse side buttons to navigate.
 - Press Command+F to search, X to toggle completion, and V to toggle each selected long note’s preview. Command-click adds or removes selections, Shift-click selects a range, and Shift+Up/Down extends its edges. Drag or Command+Up/Down rearranges selected siblings, and M opens the move destination dialog.
-- Export backups from the app to keep a separate copy of your library. Trash retains deleted items and supports restoring them.
+- On macOS, export backups from the app to keep a separate copy of your library. Trash retains deleted items and supports restoring them.
 
 The sections below describe the current source. Its stack is SvelteKit static output, Svelte, CodeMirror, Tauri, persistent Dexie IndexedDB, and Dexie Cloud. Native code provides file dialogs, atomic backup files, window behavior, clipboard, and external links. Root is the always-visible top of the live library. Its small Flowing Roots icon and separator distinguish it from the child trees below; it has no expand/collapse control. Other functional icons retain their existing appearance.
 
