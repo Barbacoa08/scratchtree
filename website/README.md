@@ -2,7 +2,7 @@
 
 Build with `pnpm build:site`. This copies the pinned `@barbajoe/css-lib` stylesheet and the existing synthetic editor overview into `website/dist`. The website has no browser JavaScript or analytics.
 
-`release.json` owns the download asset, release notes, and observed tested environment. Update it when publishing an authorized app release, after verifying the DMG and platform evidence. The development screenshot is labeled separately from the downloadable release.
+`release.json` owns the Mac and Arch download links, release notes, and observed Mac build environment. Update it when publishing an authorized app release, after verifying the included packages and their platform evidence. Include `archDownloadUrl` for a combined release. Omit it for a Mac-only release to hide the Arch action. The development screenshot is labeled separately from the downloadable release.
 
 The favicon and header use unchanged 16px, 32px, and 32px-at-2x PNG representations from the approved native ICNS. The build reads those PNG payloads directly, preserving their size mapping and artwork. Link previews use the 512px representation from the same ICNS, declared as the Open Graph image. See the [branding record](../docs/branding/README.md).
 

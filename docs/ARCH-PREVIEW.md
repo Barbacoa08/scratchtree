@@ -4,14 +4,15 @@ Scratchtree Preview targets current Arch Linux x86_64 for signed-out use with sy
 
 ## Get the package
 
-Open the [Arch Preview workflow](https://github.com/Barbacoa08/scratchtree/actions/workflows/arch-preview.yml) and select a successful run from the maintainer’s `main` branch or an explicitly trusted commit. Download its `scratchtree-preview-arch-x86_64-…` artifact. After extracting the artifact and checking `source-commit.txt`, run these commands on an up-to-date Arch x86_64 installation.
+Download the [0.2.7 Arch Linux x86_64 Preview package](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.7/scratchtree-preview-0.2.7-1-x86_64.pkg.tar.zst) and [SHA256SUMS.txt](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.7/SHA256SUMS.txt) from the [same GitHub prerelease](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.2.7). In the download directory on an up-to-date Arch x86_64 installation, verify the Arch entry and install the package.
 
 ```sh
-sha256sum --check SHA256SUMS.txt
-sudo pacman -U ./scratchtree-preview-*.pkg.tar.zst
+package='scratchtree-preview-0.2.7-1-x86_64.pkg.tar.zst'
+checksum=$(awk -v package="$package" '$2 == package { print }' SHA256SUMS.txt) &&
+  test -n "$checksum" &&
+  printf '%s\n' "$checksum" | sha256sum --check - &&
+  sudo pacman -U "./$package"
 ```
-
-The source commit identifies the build and the checksum verifies the downloaded package bytes.
 
 Launch **Scratchtree Preview** from the application menu or run `scratchtree-preview`. Remove the package with `sudo pacman -R scratchtree-preview`. Package removal leaves the Preview’s user data on disk.
 
