@@ -9,6 +9,7 @@
   } from '../platform/browser-offline';
   import {
     openWebWorkspace,
+    reorderPreview,
     type WebWorkspace,
   } from '../platform/web-workspace';
   import type { WorkspaceController } from '../workspace/controller';
@@ -180,6 +181,7 @@
 </script>
 
 {#snippet webActions()}
+  {#if reorderPreview}<p>Synthetic comparison data</p>{/if}
   <button onclick={check} disabled={preparing || checking || applying}
     >Check for updates</button
   >
