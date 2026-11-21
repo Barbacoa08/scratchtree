@@ -6,17 +6,26 @@ Scratchtree is an early alpha for Apple Silicon Macs. Version 0.2.5 includes pri
 
 Website and downloads: [scratchtree.barbajoe.tech](https://scratchtree.barbajoe.tech).
 
-![Editor overview with synthetic developer notes](docs/media/workspace-overview.png)
+![Release prep tree with a checklist open for Markdown editing, colored note markers, and a TypeScript snippet](docs/media/workspace-overview.png)
 
-_Current source preview with synthetic notes; see the download compatibility note below._
+_Scratchtree 0.2.5 browser preview with synthetic notes._
 
 ## See it in action
 
-![Reordering notes in Scratchtree](docs/media/note-reordering.gif)
+[Watch the workspace demo](docs/media/preview-demo.webm) to see how to save a Markdown note, edit its source, expand a long preview, assign a color, reorder siblings, and navigate between trees.
 
-![Navigating history with mouse side buttons](docs/media/mouse-history.gif)
+<details>
+<summary>Show drag and mouse-history examples</summary>
 
-[Watch the full preview demo](docs/media/preview-demo.webm). The demos use synthetic notes in a browser fixture; the side-button events shown were simulated and the physical buttons were confirmed separately.
+Hover over a note and drag its grab handle to move it within the tree.
+
+![Dragging Release checklist below Retry settings in the same tree](docs/media/note-reordering.gif)
+
+Open a child tree, then use Back and Forward to revisit both locations. The animation uses simulated mouse side buttons.
+
+![Opening QA notes, going back to Release prep, and returning to QA notes](docs/media/mouse-history.gif)
+
+</details>
 
 ## Download and install
 
@@ -29,12 +38,10 @@ _Current source preview with synthetic notes; see the download compatibility not
 1. Export a backup before updating, and quit older app copies. The older alpha.5 uses a different backup format: prepare a converted BackupV8 copy before importing it into 0.2.5. See [Transfer from alpha.5](#transfer-from-alpha5) below.
 2. Open the downloaded DMG, drag Scratchtree to Applications, and replace the existing app if prompted. Your app data is stored separately from the app.
 3. Open Scratchtree from Applications. This alpha is ad-hoc signed, but is not Developer ID signed or notarized, so macOS may block the first launch.
-4. If macOS shows a warning, click **Done**. Open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway** for Scratchtree.
+4. If macOS blocks Scratchtree because it can’t verify the developer, click **Done**. Open **System Settings → Privacy & Security**, scroll to **Security**, and choose **Open Anyway** for Scratchtree.
 5. Authenticate if prompted, and confirm **Open**.
 
-![macOS Privacy & Security settings with the Open Anyway button for Scratchtree marked in yellow](docs/media/open-anyway.png)
-
-Only open the app if you trust the download. A managed Mac may restrict this option. See [Apple’s instructions for safely opening apps](https://support.apple.com/en-us/102445) for more information.
+Only open the app if you trust the download. A managed Mac may restrict this option. [Apple’s illustrated Open Anyway guide](https://support.apple.com/en-us/102445) shows the current Privacy & Security screen.
 
 ## Transfer from alpha.5
 
@@ -47,10 +54,20 @@ The BackupV7 converter is a separate maintainer-assisted tool, not part of the a
 
 ## Get started
 
-- Type a note in the bottom composer and press Enter to save. Markdown markers stay visible while emphasis, lists, and code are styled.
+Paste this Markdown into the composer at the bottom, then press Enter to save.
+
+```markdown
+**Release checklist**
+
+- Verify offline editing
+- Check keyboard shortcuts
+- Update the download notes
+```
+
+- Select your checklist and press L to assign a color. The gutter keeps the color visible as you hover and edit.
 - Select a note and press E or double-click to edit it. Press Enter outside fenced code or Escape to finish editing and keep changes.
 - Press Command+N to write inside the selected note, or write here when nothing is selected. Enter/Right opens a selected item. Use the breadcrumb, Back/Forward controls, or mouse side buttons to navigate.
-- Press Command+F to search, X to toggle completion, and V to expand or collapse a selected long note. Command-click adds or removes selections, Shift-click selects a range, and Shift+Up/Down extends its edges. Drag or Command+Up/Down rearranges selected siblings, and M opens the move destination dialog.
+- Press Command+F to search, X to toggle completion, and V to toggle each selected long note’s preview. Command-click adds or removes selections, Shift-click selects a range, and Shift+Up/Down extends its edges. Drag or Command+Up/Down rearranges selected siblings, and M opens the move destination dialog.
 - Export backups from the app to keep a separate copy of your library. Trash retains deleted items and supports restoring them.
 
 The sections below describe the current source. Its stack is SvelteKit static output, Svelte, CodeMirror, Tauri, persistent Dexie IndexedDB, and Dexie Cloud. Native code provides file dialogs, atomic backup files, window behavior, clipboard, and external links. Root is the always-visible top of the live library. Its small Flowing Roots icon and separator distinguish it from the child trees below; it has no expand/collapse control. Other functional icons retain their existing appearance.

@@ -1,5 +1,7 @@
-# Scratchtree demonstrations
+# Scratchtree media
 
-These demonstrations were recaptured from the Scratchtree development browser fixture using synthetic notes, including the current Export/Restore icons. The GIFs show sibling reordering and mouse-history navigation; the WebM contains the full demonstration. Cursor and caption annotations were added to the action recordings for clarity. Side-button events are simulated. These browser examples do not establish physical-mouse, native persistence, assistive-technology, or packaged-app acceptance.
+The README and landing page share the 1180 × 820 workspace screenshot. It shows the Release prep tree with a Markdown checklist in the inline editor, colored gutter markers, a TypeScript snippet, and the current Details and shortcuts pane.
 
-The overview shows the current source UI without recording annotations, using synthetic developer notes in a separate in-memory fixture. It illustrates Markdown rendering, note trees, colors, and the desktop layout. It contains no personal library or simulated native window controls. Recordings do not change the actual movement animation speed. Release notes record the source and separate native checks for the published DMG.
+The short GIFs show sibling reordering and Back/Forward navigation between note trees. The silent WebM also shows writing and editing a note, expanding a long preview, and assigning a color. Captions and pointer highlights are recording annotations. The mouse side buttons are simulated.
+
+The media was captured from the Scratchtree 0.2.5 browser fixture on commit f5d78a0d3132fb094a000bcd8d987a0009b13534 with an isolated in-memory library of synthetic notes. Browser captures cover the illustrated interactions. Packaged app behavior, physical mouse buttons, and assistive technology have separate acceptance checks. The README links to Apple’s maintained installation illustration.
