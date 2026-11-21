@@ -1,8 +1,8 @@
-# Mac preview releases
+# Scratchtree prereleases
 
-Scratchtree currently installs through an Apple Silicon DMG published as a GitHub prerelease. Releases are manual; there is no automatic updater. The 0.2.6 prerelease includes private-account Dexie Cloud synchronization; the retained alpha.5 installer uses local notes only. State the behavior of the exact installer being released, and do not infer publication authorization from source implementation. [README.md](../README.md#download-and-install) is the user-facing installation guide.
+Publish the Apple Silicon DMG and, when included, the Arch Linux x86_64 Preview package as separate assets on one GitHub prerelease. Build both from the same reviewed release commit. Releases are manual, and updates are manual on both platforms. The 0.2.6 prerelease includes private-account Dexie Cloud synchronization; the retained alpha.5 installer uses local notes only. State the behavior of the exact installer being released, and do not infer publication authorization from source implementation. [README.md](../README.md#download-and-install) is the user-facing installation guide.
 
-The alpha is ad-hoc signed, **not Developer ID signed or notarized**. Production signing, credentials, notarization, Intel builds, and other platforms require separate decisions. The permanent release identifier is `tech.barbajoe.scratchtree`; data is stored separately from the application bundle. Alpha changes may break identity or format compatibility, but using actual notes requires a deliberate private backup and transfer plan first.
+The Mac app is ad-hoc signed, **not Developer ID signed or notarized**. Production signing, credentials, notarization, and additional platform targets require separate decisions. The Mac release identifier is `tech.barbajoe.scratchtree`; data is stored separately from the application bundle. Alpha changes may break identity or format compatibility, but using actual notes requires a deliberate private backup and transfer plan first.
 
 ## Scope and prerequisites
 
@@ -110,10 +110,17 @@ The trap detaches the successfully attached image if a later check exits or is i
 codesign --verify --deep --strict "$release_mount/Scratchtree.app"
 release_cleanup
 trap - EXIT HUP INT TERM
-(cd "$release_dir/assets" && shasum -a 256 "$release_name" > SHA256SUMS.txt)
 ```
 
 `hdiutil` may print deprecation notices on newer macOS versions. This is the verified packaging procedure used for the current alpha; record actual tool behavior and validate an alternative before changing the process.
+
+## Stage the Arch Linux x86_64 Preview
+
+When a prerelease includes Arch, dispatch [Arch Preview](../.github/workflows/arch-preview.yml) on the verified `main` release commit. Check the selected run’s event, branch, successful conclusion, and exact head SHA. Download the successful package and smoke artifacts for that run and attempt into the release task folder. Compare the recorded source commit and tree with the Mac build’s `source-identity.txt`. If `main` advances before dispatch and there is no successful run for the selected release commit, review the new `main` source and build both installers from it before staging.
+
+Verify the package’s SHA-256 against its CI manifest and inspect the package metadata for `scratchtree-preview`, `x86_64`, and the release’s internal application version with the recipe’s Arch package revision. Review the smoke log for offline desktop launch, save and edit, and restart with exact Markdown. Check the workflow log for package installation and removal. Copy the verified `scratchtree-preview-<version>-<pkgrel>-x86_64.pkg.tar.zst` into `$release_dir/assets` and record the run URL and evidence in the release notes. Confirm that the exact source used for this build applies the Preview override with identifier `tech.barbajoe.scratchtree.preview`.
+
+Describe Arch as an experimental signed-out Preview tested on virtual X11 with Arch WebKitGTK. The initial Preview defers native backup-dialog acceptance. Report the status of that check, Wayland, upgrades, and sync in the release notes. See the [Arch Preview guide](ARCH-PREVIEW.md) for installation and test scope.
 
 ## Release notes, upload, and publication
 
@@ -121,48 +128,58 @@ Write release notes inside the task folder. Include changes, exact source identi
 
 For an ad-hoc release, install the app in Applications, try opening it, click **Done** on the warning, then open **System Settings → Privacy & Security → Security** and click **Open Anyway**. See the [installation steps](../README.md#download-and-install) and the linked Apple illustration. Authenticate if prompted and confirm **Open**. Proceed only if you trust the download. Link [Apple's per-app opening instructions](https://support.apple.com/en-us/102445) and note that managed Macs may restrict opening. Do not prescribe disabling system-wide protections or removing quarantine attributes.
 
-Create a draft first so uploaded files can be checked before public publication:
+Stage only the approved installer files in `assets`. Generate one checksum manifest over the exact installers and create the draft prerelease. For the combined example, first set `arch_package_name` to the verified Arch package basename. For a Mac-only prerelease, set `release_assets=("$release_name")` and use the matching title.
 
-```sh
-gh release create "$release_tag" "$release_dmg" "$release_dir/assets/SHA256SUMS.txt" \
-  --repo Barbacoa08/scratchtree --draft --prerelease --target "$release_commit" \
-  --title "Scratchtree $release_label — Apple Silicon" \
-  --notes-file "$release_dir/release-notes.md"
-gh api 'repos/Barbacoa08/scratchtree/releases?per_page=100' \
-  > "$release_dir/draft-releases.json"
+```bash
+release_assets=("$release_name" "$arch_package_name")
+release_title="Scratchtree $release_label — Apple Silicon and Arch Preview"
+(
+  cd "$release_dir/assets"
+  shasum -a 256 -- "${release_assets[@]}" > SHA256SUMS.txt
+  gh release create "$release_tag" "${release_assets[@]}" SHA256SUMS.txt \
+    --repo Barbacoa08/scratchtree --draft --prerelease --target "$release_commit" \
+    --title "$release_title" --notes-file "$release_dir/release-notes.md"
+)
+draft_id=$(gh release view "$release_tag" --repo Barbacoa08/scratchtree --json databaseId --jq .databaseId)
+gh api "repos/Barbacoa08/scratchtree/releases/$draft_id" > "$release_dir/draft-release.json"
 gh release download "$release_tag" --repo Barbacoa08/scratchtree \
-  --dir "$release_dir/download-check" --pattern '*.dmg' --pattern SHA256SUMS.txt
-cmp "$release_dmg" "$release_dir/download-check/$release_name"
-cmp "$release_dir/assets/SHA256SUMS.txt" "$release_dir/download-check/SHA256SUMS.txt"
+  --dir "$release_dir/download-check"
+for asset in "${release_assets[@]}" SHA256SUMS.txt; do
+  cmp "$release_dir/assets/$asset" "$release_dir/download-check/$asset"
+done
 ```
 
-Before publishing, select the exact tag from the returned metadata and verify draft/prerelease flags, full target commit, exact asset names, uploaded state, byte counts, and asset digests against the local files. Both downloaded assets must be byte-identical. Do not mark those checks complete in release notes until they have actually passed. On failure, keep the release as a draft, preserve evidence, and resolve the issue before proceeding. Use the connected GitHub tools when they support the operation; the CLI supplies release mutations and binary transfers when the connector cannot.
+Before publishing, verify the draft and prerelease flags, full target commit, exact asset names, uploaded state, byte counts, and asset digests against the local files. On failure, keep the release as a draft and resolve the issue. Use the GitHub connector where supported and the CLI for release binary transfers.
 
 When these checks pass and publication is authorized:
 
-```sh
+```bash
 gh release edit "$release_tag" --repo Barbacoa08/scratchtree \
   --draft=false --prerelease --latest=false
 gh api "repos/Barbacoa08/scratchtree/releases/tags/$release_tag" \
   > "$release_dir/published-release.json"
-git ls-remote --tags origin "refs/tags/$release_tag" \
+git ls-remote --tags origin "refs/tags/$release_tag" "refs/tags/$release_tag^{}" \
   > "$release_dir/published-tag.txt"
-curl --fail --location --silent --show-error \
-  --output "$release_dir/public-download.dmg" \
-  "https://github.com/Barbacoa08/scratchtree/releases/download/$release_tag/$release_name"
-cmp "$release_dmg" "$release_dir/public-download.dmg"
+mkdir "$release_dir/public-download"
+for asset in "${release_assets[@]}" SHA256SUMS.txt; do
+  curl --fail --location --silent --show-error \
+    --output "$release_dir/public-download/$asset" \
+    "https://github.com/Barbacoa08/scratchtree/releases/download/$release_tag/$asset"
+  cmp "$release_dir/assets/$asset" "$release_dir/public-download/$asset"
+done
+(cd "$release_dir/public-download" && shasum -a 256 -c SHA256SUMS.txt)
 ```
 
-Confirm public metadata says `draft: false`, `prerelease: true`, and the expected target/assets; the published tag must resolve to the exact release commit. The unauthenticated public download must match the local SHA-256 and byte count. Preserve the release URL, artifact identities, verification output, and any omissions locally. If post-publication checks fail, report the failure and assess the next action under the current authorization; do not silently replace immutable assets or repoint tags.
+Confirm public metadata has `draft: false` and `prerelease: true`, the tag resolves to the exact release commit, and the public assets match the verified draft. Preserve the release URL, artifact identities, verification output, and omissions locally. If post-publication checks fail, resolve the issue within the current authorization and preserve immutable assets and tags.
 
 ## Website links and automatic deployment (required)
 
 A release is not complete when the GitHub assets alone are published. The release task includes the website handoff below; do not leave it for the user to request separately.
 
-1. **Update links after publication is verified.** Update the root README's installation and release-notes links, plus `website/release.json` (`version`, `downloadUrl`, and `releaseUrl`), to the exact published tag and DMG. Keep `testedOn` tied to observed platform evidence, and update other current-version guidance where necessary while preserving historical facts. Use exact tag/asset URLs; prereleases are not reliably addressed by `releases/latest`.
+1. **Update links after publication is verified.** Update the root README's installation and release-notes links, plus `website/release.json` (`version`, `downloadUrl`, and `releaseUrl`), to the exact published tag and DMG. For a combined prerelease, also add the exact published package link to the Arch Preview installation guide and the landing page. Show Arch users how to verify the package’s own entry in the shared checksum file. Keep `testedOn` tied to observed platform evidence, and update other current-version guidance where necessary while preserving historical facts. Use exact tag/asset URLs; prereleases are not reliably addressed by `releases/latest`.
 2. **Review, check, and merge the metadata update.** Follow [CONTRIBUTING.md](../CONTRIBUTING.md): use a fresh task branch from current main, one independent documentation review, formatting and local-link checks, and `pnpm build:site`. Confirm the generated page has the intended version and links, then merge the reviewed PR into `main` as part of the authorized release. Record its merged commit separately from the immutable application release commit. A documentation-only follow-up does not require rebuilding or replacing the published app, DMG, or tag.
 3. **Wait for the automatic production deployment.** The existing `scratchtree` Netlify project is linked to `Barbacoa08/scratchtree` through the Netlify GitHub App. Confirm builds are active on production branch `main`, with the checked-in `netlify.toml` using `pnpm build:site`, `website/dist`, and `netlify/functions`. After the merge, wait for the Git-triggered production deploy to finish, and verify that its source commit matches the merged metadata commit and that it is the currently published deploy. A deploy preview, an older successful deploy, or a manual CLI upload does not establish this automatic merge-to-production path. A routine release should not need a manual upload.
-4. **Verify the public result and actual download.** Fetch both [scratchtree.barbajoe.tech](https://scratchtree.barbajoe.tech/) and [scratchtree.netlify.app](https://scratchtree.netlify.app/). Check that the pages show the intended release, their download and release-notes links match the published assets, and the static asset hashes match the reviewed local site build. Follow the download link extracted from the live page, require a successful unauthenticated download, and compare the downloaded DMG's byte count and SHA-256 with the verified release artifact and published `SHA256SUMS.txt`. Preserve the existing account-check function and private server settings; check native-origin preflight and a synthetic unknown-account response without reading or transmitting private allow-list entries or sending an OTP. Separate real-account acceptance remains subject to its existing authorization and evidence requirements.
+4. **Verify the public result and actual download.** Fetch both [scratchtree.barbajoe.tech](https://scratchtree.barbajoe.tech/) and [scratchtree.netlify.app](https://scratchtree.netlify.app/). Check that the pages show the intended release, their download and release-notes links match the published assets, and the static asset hashes match the reviewed local site build. Follow every installer link extracted from the live page, require a successful unauthenticated download for each, and compare each downloaded installer’s byte count and SHA-256 with the verified release artifacts and published `SHA256SUMS.txt`. Preserve the existing account-check function and private server settings; check native-origin preflight and a synthetic unknown-account response without reading or transmitting private allow-list entries or sending an OTP. Separate real-account acceptance remains subject to its existing authorization and evidence requirements.
 5. **Record completion or resolve the failure.** Record the release URL, metadata PR/merged commit, Netlify deploy ID/source commit, public page/link results, and download checksum in the task evidence and final handoff. Do not report the full release complete until the GitHub publication, merged links, automatic production deployment, and live download checks all pass. If the automatic deployment fails or the page stays stale, inspect the build, repository connection, and published commit, and resolve the existing pipeline within the authorized scope. If a required permission or external blocker prevents completion, report the exact unfinished gate. Keep immutable release assets and tags unchanged while diagnosing website failures.
 
 Never advertise synchronization, automatic updates, notarization, or wider platform support that the released build does not provide.

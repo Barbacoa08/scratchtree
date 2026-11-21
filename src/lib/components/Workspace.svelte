@@ -51,7 +51,8 @@
   import { filterNotes } from '../domain/search';
   import { timestampPresentation } from '../domain/timestamps';
   import { attachCloseGuard, type CloseAdapter } from '../platform/lifecycle';
-  import { nativeCloseAdapter } from '../platform/native-lifecycle';
+  import { createNativeCloseAdapter } from '../platform/native-lifecycle';
+  import { isLinuxDesktop } from '../platform/desktop-platform';
   import { attachMouseHistory } from '../platform/mouse-history';
   let {
     repository,
@@ -229,6 +230,12 @@
   let detailsOpen = $state(false);
   let detailsChoice: boolean | null = null;
   let nativeChrome = $state(false);
+  let linuxDesktop = $state(false);
+  let closeAdapter: CloseAdapter;
+  let commandKey = $derived(linuxDesktop ? 'Control' : 'Meta');
+  let commandLabel = $derived(linuxDesktop ? 'Control' : 'Command');
+  let commandGlyph = $derived(linuxDesktop ? 'Ctrl' : '⌘');
+  let commandPrefix = $derived(linuxDesktop ? 'Ctrl+' : '⌘');
   const navigation = new NavigationHistory();
   let historyRevision = $state(0);
   let backVisit = $derived.by(() => {
@@ -391,7 +398,7 @@
     commandHeld && viewState.loaded && !blocked && !palette,
   );
   let streamCommandHint = $derived.by(() => {
-    const hints = ['⌘N Write a note'];
+    const hints = [`${commandPrefix}N Write a note`];
     const selectedVisible = shownEntries.some((x) => x.id === selected);
     const typing = isTyping(hintFocus);
     // Handles have their own Command-arrow binding; other controls use the
@@ -416,13 +423,15 @@
         (entry, index) => entry !== before[index],
       );
       if (up || down)
-        hints.push(`⌘${up && down ? '↑/↓' : up ? '↑' : '↓'} Reorder`);
+        hints.push(
+          `${commandPrefix}${up && down ? '↑/↓' : up ? '↑' : '↓'} Reorder`,
+        );
     }
     if (selectedVisible && !typing && !hintTextSelected)
       hints.push(
         viewState.location.scope === 'trash'
-          ? '⌘⌫ Permanently delete'
-          : '⌘⌫ Delete',
+          ? `${commandPrefix}⌫ Permanently delete`
+          : `${commandPrefix}⌫ Delete`,
       );
     return hints.join(' · ');
   });
@@ -637,7 +646,9 @@
       viewState = next;
       historyRevision++;
     });
-    nativeChrome = isTauri();
+    linuxDesktop = isLinuxDesktop();
+    nativeChrome = isTauri() && !linuxDesktop;
+    closeAdapter = windowAdapter ?? createNativeCloseAdapter(linuxDesktop);
     void controller.start().then(() => onready?.(controller));
     // CSS can drop activeElement to body before the breakpoint event arrives.
     // Remember only the current focus, and let any newer real target take precedence.
@@ -709,9 +720,8 @@
     if (windowAdapter || isTauri())
       detach = attachCloseGuard(
         {
-          onCloseRequested: (handler) =>
-            (windowAdapter ?? nativeCloseAdapter).onCloseRequested(handler),
-          hide: hideWindow,
+          onCloseRequested: closeAdapter.onCloseRequested,
+          finishClose,
         },
         () => controller.flush(),
         showCloseFailure,
@@ -907,7 +917,7 @@
   }
   function selectionPointer(event: PointerEvent) {
     if (
-      (event.metaKey || event.shiftKey) &&
+      (primaryModifier(event) || event.shiftKey) &&
       !blocked &&
       (!(event.target as Element).closest('button') ||
         !!(event.target as Element).closest('.note-select,.drag-handle')) &&
@@ -927,7 +937,10 @@
     mouseSelection =
       viewState.query.trim() || !siblings.includes(id)
         ? { ids: [id], primary: id, anchor: id }
-        : mouseSelect(mouseSelection, siblings, id, event);
+        : mouseSelect(mouseSelection, siblings, id, {
+            metaKey: primaryModifier(event),
+            shiftKey: event.shiftKey,
+          });
     selection.remember(viewState.location, selected);
     if (activeNote && activeNote.id !== id) leaveEdit(activeNote.id);
     stream?.focus();
@@ -1443,9 +1456,9 @@
   }
   function moveKey(event: KeyboardEvent, id: string) {
     if (
-      !event.metaKey ||
+      !primaryModifier(event) ||
       event.altKey ||
-      event.ctrlKey ||
+      secondaryModifier(event) ||
       event.shiftKey ||
       event.repeat ||
       event.isComposing ||
@@ -1576,23 +1589,29 @@
     scrollSelection();
     return true;
   }
+  function primaryModifier(event: MouseEvent | KeyboardEvent) {
+    return linuxDesktop ? event.ctrlKey : event.metaKey;
+  }
+  function secondaryModifier(event: KeyboardEvent) {
+    return linuxDesktop ? event.metaKey : event.ctrlKey;
+  }
   function clearCommand() {
     commandHeld = false;
   }
   function releaseCommand(event: KeyboardEvent) {
-    if (event.key === 'Meta' || !event.metaKey) clearCommand();
+    if (event.key === commandKey || !primaryModifier(event)) clearCommand();
   }
   function globalCommands(event: KeyboardEvent) {
-    if (event.key === 'Meta' && !event.isComposing) commandHeld = true;
+    if (event.key === commandKey && !event.isComposing) commandHeld = true;
     if (
       event.defaultPrevented ||
       event.isComposing ||
       !viewState.loaded ||
       (blocked && !(/^[1-9]$/.test(event.key) && !navigationBlocked)) ||
       palette ||
-      !event.metaKey ||
+      !primaryModifier(event) ||
       event.altKey ||
-      event.ctrlKey ||
+      secondaryModifier(event) ||
       event.shiftKey
     )
       return;
@@ -1623,13 +1642,13 @@
             event.key.toLowerCase(),
           ))) ||
       event.altKey ||
-      event.ctrlKey
+      secondaryModifier(event)
     )
       return;
     const key = event.key.toLowerCase();
     if (event.shiftKey) {
       if (
-        !event.metaKey &&
+        !primaryModifier(event) &&
         !viewState.query.trim() &&
         event.target === stream &&
         !window.getSelection()?.toString() &&
@@ -1651,7 +1670,7 @@
       }
       return;
     }
-    if (event.metaKey) {
+    if (primaryModifier(event)) {
       if (
         (key === 'arrowup' || key === 'arrowdown') &&
         !isTyping(event.target)
@@ -1824,20 +1843,20 @@
       focus.stop();
     }
   }
-  async function hideWindow() {
-    await (windowAdapter ?? nativeCloseAdapter).hide();
+  async function finishClose() {
+    await closeAdapter.finishClose();
     await dismissCloseFailure();
   }
   async function retryClose() {
     try {
-      if (await controller.flush()) await hideWindow();
+      if (await controller.flush()) await finishClose();
     } catch {
       showCloseFailure();
     }
   }
   async function hideWithoutSaving() {
     try {
-      await hideWindow();
+      await finishClose();
     } catch {
       showCloseFailure();
     }
@@ -1860,7 +1879,9 @@
     {#if !compact}<p>
         {authState.authenticated
           ? 'Local saves and cloud sync.'
-          : 'Notes and drafts on this Mac.'}
+          : linuxDesktop
+            ? 'Notes and drafts on this device.'
+            : 'Notes and drafts on this Mac.'}
       </p>{/if}
     {#if sync && (!compact || compactSync)}<SyncStatus
         {sync}
@@ -1991,13 +2012,14 @@
             disabled={modal}
           />
           {#if showCommandHints}<span class="command-hint" aria-hidden="true"
-              >⌘/</span
+              >{commandPrefix}/</span
             >{/if}
         </div>
         <div class="navigation-hint-anchor">
           <TreeSidebar
             presentation={hierarchy}
             {showCommandHints}
+            {commandPrefix}
             currentId={viewState.ownerId}
             live={viewState.location.scope === 'live'}
             disabled={navigationBlocked}
@@ -2005,7 +2027,7 @@
           />
           {#if showCommandHints}<span
               class="command-hint home-command-hint"
-              aria-hidden="true">⌘1</span
+              aria-hidden="true">{commandPrefix}1</span
             >{/if}
         </div>
         <div class="backup-actions">
@@ -2105,6 +2127,7 @@
         >
           {#each shownEntries as entry (entry.id)}
             <ItemCard
+              {commandLabel}
               bind:this={noteBodies[entry.id]}
               item={entry}
               reorderable={!viewState.query.trim()}
@@ -2143,7 +2166,7 @@
               onselectbutton={(event) => selectCard(event, entry.id)}
               onhandleselect={(event) => {
                 if (
-                  event.metaKey ||
+                  primaryModifier(event) ||
                   event.shiftKey ||
                   !selectedIds.has(entry.id)
                 )
@@ -2247,7 +2270,9 @@
           <h2>Details and shortcuts</h2>
           <p>
             {visibleNotes.length}
-            {visibleNotes.length === 1 ? 'note' : 'notes'} · On this Mac
+            {visibleNotes.length === 1 ? 'note' : 'notes'} · {linuxDesktop
+              ? 'On this device'
+              : 'On this Mac'}
           </p>
           {#if selectedNote}{@const created = timestampPresentation(
               selectedNote.createdAt,
@@ -2301,28 +2326,29 @@
           <div class="shortcut-list" aria-label="Keyboard shortcuts">
             <div>
               <span>Write a note in selection</span><span class="shortcut-keys"
-                ><kbd>⌘</kbd><kbd>N</kbd></span
+                ><kbd>{commandGlyph}</kbd><kbd>N</kbd></span
               >
             </div>
             <div>
               <span>Root</span><span class="shortcut-keys"
-                ><kbd>⌘</kbd><kbd>1</kbd></span
+                ><kbd>{commandGlyph}</kbd><kbd>1</kbd></span
               >
             </div>
             <div>
               <span>Bold / Italic</span><span class="shortcut-keys"
-                ><kbd>⌘</kbd><kbd>B</kbd><span>/</span><kbd>⌘</kbd><kbd>I</kbd
-                ></span
+                ><kbd>{commandGlyph}</kbd><kbd>B</kbd><span>/</span><kbd
+                  >{commandGlyph}</kbd
+                ><kbd>I</kbd></span
               >
             </div>
             <div><span>Write a note</span><kbd>Space</kbd></div>
             <div>
               <span aria-hidden="true">Search</span><span class="sr-only"
-                >Search: Command slash, Command F, or slash</span
+                >Search: {commandLabel} slash, {commandLabel} F, or slash</span
               ><span class="shortcut-keys" aria-hidden="true"
-                ><kbd>⌘</kbd><kbd>/</kbd><span aria-hidden="true">/</span><kbd
-                  >/</kbd
-                ></span
+                ><kbd>{commandGlyph}</kbd><kbd>/</kbd><span aria-hidden="true"
+                  >/</span
+                ><kbd>/</kbd></span
               >
             </div>
             <div>
@@ -2351,9 +2377,9 @@
             <div>
               <span aria-hidden="true">Reorder siblings</span><span
                 class="sr-only"
-                >Reorder siblings: Command Up or Command Down</span
+                >Reorder siblings: {commandLabel} Up or {commandLabel} Down</span
               ><span class="shortcut-keys" aria-hidden="true"
-                ><kbd>⌘</kbd><kbd>↑</kbd><kbd>↓</kbd></span
+                ><kbd>{commandGlyph}</kbd><kbd>↑</kbd><kbd>↓</kbd></span
               >
             </div>
             <div>
@@ -2363,17 +2389,17 @@
                   : 'Delete selected'}</span
               ><span class="sr-only"
                 >{viewState.location.scope === 'trash'
-                  ? 'Permanently delete selected: Command Backspace'
-                  : 'Delete selected: Command Backspace'}</span
+                  ? `Permanently delete selected: ${commandLabel} Backspace`
+                  : `Delete selected: ${commandLabel} Backspace`}</span
               ><span class="shortcut-keys" aria-hidden="true"
-                ><kbd>⌘</kbd><kbd>⌫</kbd></span
+                ><kbd>{commandGlyph}</kbd><kbd>⌫</kbd></span
               >
             </div>
             <div>
               <span aria-hidden="true">Undo delete</span><span class="sr-only"
-                >Undo delete outside text editing: Command Z</span
+                >Undo delete outside text editing: {commandLabel} Z</span
               ><span class="shortcut-keys" aria-hidden="true"
-                ><kbd>⌘</kbd><kbd>Z</kbd></span
+                ><kbd>{commandGlyph}</kbd><kbd>Z</kbd></span
               >
             </div>
           </div>
@@ -2452,18 +2478,27 @@
     {#if closeFailed}<section
         data-close-recovery
         class="confirmation"
-        aria-label="Could not hide window"
+        aria-labelledby="close-failure-heading"
       >
-        <h2>Could not hide window</h2>
+        <h2 id="close-failure-heading">
+          Could not {linuxDesktop ? 'close' : 'hide'} window
+        </h2>
         <p>
-          Your notes and drafts are still here. Retry saving and hiding, or keep
-          the window open. If you hide without saving, unsaved input stays in
-          memory until you quit.
+          {#if linuxDesktop}
+            Your notes and drafts are still here. Retry saving and closing, or
+            keep the window open.
+          {:else}
+            Your notes and drafts are still here. Retry saving and hiding, or
+            keep the window open. If you hide without saving, unsaved input
+            stays in memory until you quit.
+          {/if}
         </p>
-        <button use:focusChoice onclick={retryClose}>Retry and hide</button
-        ><button onclick={dismissCloseFailure}>Keep window open</button><button
-          onclick={hideWithoutSaving}>Hide without saving</button
-        >
+        <button use:focusChoice onclick={retryClose}
+          >Retry and {linuxDesktop ? 'close' : 'hide'}</button
+        ><button onclick={dismissCloseFailure}>Keep window open</button>
+        {#if !linuxDesktop}<button onclick={hideWithoutSaving}
+            >Hide without saving</button
+          >{/if}
       </section>{/if}
   {/if}
 </main>

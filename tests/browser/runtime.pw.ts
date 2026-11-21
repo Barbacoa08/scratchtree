@@ -292,6 +292,7 @@ test('slow native startup names the Keychain item before opening and continues w
   page,
 }) => {
   await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel' });
     (window as any).isTauri = true;
     (window as any).__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' } },

@@ -1,0 +1,18 @@
+# Packages the Debian bundle generated for this exact Preview build.
+pkgname=scratchtree-preview
+pkgver="${SCRATCHTREE_VERSION:?Provide the Debian artifact version}"
+pkgrel=1
+pkgdesc='Scratchtree Markdown notes, experimental desktop preview'
+arch=('x86_64')
+url='https://github.com/Barbacoa08/scratchtree'
+depends=('glibc' 'gtk3' 'hicolor-icon-theme' 'libx11' 'webkit2gtk-4.1' 'xdg-utils')
+options=('!strip' '!debug')
+source=('scratchtree-preview.deb')
+noextract=("${source[@]}")
+sha256sums=("${SCRATCHTREE_DEB_SHA256:?Provide the Debian artifact checksum}")
+
+package() {
+  set -o pipefail
+  bsdtar -xOf "$srcdir/scratchtree-preview.deb" data.tar.gz |
+    bsdtar -xf - -C "$pkgdir"
+}

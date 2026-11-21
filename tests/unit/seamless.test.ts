@@ -164,7 +164,7 @@ it('window close drains late inline input before hiding and keeps the window ope
         handler = fn;
         return () => {};
       },
-      hide: async () => {
+      finishClose: async () => {
         hidden = repo.snapshot.items.filter((x) => x.kind === 'note')[0]
           .markdown;
       },

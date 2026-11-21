@@ -104,3 +104,36 @@ test('a platform hide error offers recovery and successful retry returns focus t
     await page.evaluate(() => (window as any).__test.windowState.hideAttempts),
   ).toBe(2);
 });
+
+test('Linux desktop uses Control shortcuts and keeps a draft after a failed close', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64' });
+    (window as any).isTauri = true;
+    (window as any).__TAURI_INTERNALS__ = { invoke: async () => {} };
+  });
+  await page.goto('/?fixture&lifecycle');
+  const capture = page.getByRole('textbox', { name: 'New note Markdown' });
+  const search = page.getByRole('searchbox');
+  await capture.press('Control+f');
+  await expect(search).toBeFocused();
+  await search.press('Control+n');
+  await expect(capture).toBeFocused();
+
+  await page.evaluate(() => {
+    (window as any).__test.repo.fail = 'checkpoint';
+  });
+  await capture.fill('retained Linux draft');
+  await page.evaluate(() => (window as any).__test.requestClose());
+  const recovery = page.getByRole('region', { name: 'Could not close window' });
+  await expect(
+    recovery.getByRole('button', { name: 'Retry and close' }),
+  ).toBeFocused();
+  await expect(
+    recovery.getByRole('button', { name: 'Hide without saving' }),
+  ).toHaveCount(0);
+  await recovery.getByRole('button', { name: 'Keep window open' }).click();
+  await expect(capture).toBeFocused();
+  await expect(capture).toHaveText('retained Linux draft');
+});

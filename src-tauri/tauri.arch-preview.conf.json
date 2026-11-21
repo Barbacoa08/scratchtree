@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "mainBinaryName": "scratchtree-preview",
+  "bundle": {
+    "targets": ["deb"],
+    "icon": ["icons/linux-128.png"]
+  }
+}

@@ -3,8 +3,8 @@ const card = (page: Page, id: string) =>
   page.locator(`[data-entry-id="${id}"]`);
 const capture = (page: Page) =>
   page.getByRole('textbox', { name: 'New note Markdown' });
-async function seed(page: Page) {
-  await page.goto('/?fixture');
+async function seed(page: Page, url = '/?fixture') {
+  await page.goto(url);
   await capture(page).waitFor();
   return page.evaluate(async () => {
     const t = (window as any).__test;
@@ -357,4 +357,24 @@ test('V flips each selected long note independently and keeps the selection', as
   await page.keyboard.press('v');
   await expect(collapse(first)).toHaveAttribute('aria-expanded', 'true');
   await expect(expand(second)).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('Linux Control-click toggles both selected and unselected reorder handles', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64' });
+    (window as any).isTauri = true;
+    (window as any).__TAURI_INTERNALS__ = { invoke: async () => {} };
+  });
+  const ids = await seed(page, '/?fixture&lifecycle');
+  await card(page, ids[0]).click();
+  const second = card(page, ids[2]);
+  const handle = second.getByRole('button', { name: 'Reorder note' });
+  await second.hover();
+  // Chromium on macOS converts a physical Ctrl-click to contextmenu.
+  await handle.dispatchEvent('click', { ctrlKey: true });
+  await expect.poll(() => selected(page)).toEqual([ids[0], ids[2]]);
+  await handle.dispatchEvent('click', { ctrlKey: true });
+  await expect.poll(() => selected(page)).toEqual([ids[0]]);
 });
