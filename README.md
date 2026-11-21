@@ -1,8 +1,8 @@
 # Scratchtree
 
-Scratchtree is a local-first Mac notes app for developers. Capture a thought without leaving the keyboard, write Markdown with its syntax still visible, and keep code snippets, lists, and related notes together in note trees.
+Scratchtree is a local-first Markdown notes app for developers. Capture a thought without leaving the keyboard, write Markdown with its syntax still visible, and keep code snippets, lists, and related notes together in note trees.
 
-Scratchtree is an early alpha for Apple Silicon Macs. Version 0.2.6 includes private, existing-account Dexie Cloud synchronization while keeping notes available locally. Public sign-up is not available.
+Scratchtree supports Apple Silicon Macs in early alpha and offers an experimental Arch Linux x86_64 Preview. The Mac alpha includes private, existing-account Dexie Cloud synchronization. Public sign-up is unavailable. The Arch Preview scope is signed-out local use with disposable notes.
 
 Website and downloads: [scratchtree.barbajoe.tech](https://scratchtree.barbajoe.tech).
 
@@ -29,6 +29,8 @@ Open a child tree, then use Back and Forward to revisit both locations. The anim
 
 ## Download and install
 
+### Apple Silicon Mac
+
 **Scratchtree alpha:** the application has its own name, native identity, note-tree terminology, and backup format. The Mac app keeps running when its window closes and returns through Command+Tab or the Dock.
 
 **Alpha compatibility:** version 0.2.6 uses persistent Dexie IndexedDB, BackupV8, and the release identity introduced in 0.2.0. Updating from 0.2.0 through 0.2.5 retains that identity and format. The release uses a separate local profile from earlier alphas and never automatically reads an older store. Before updating from the local-only alpha.5, export and retain its unchanged BackupV7, convert a copy with the separate local transfer tool, and verify the import and a fresh export. Signing in does not transfer those old local notes. Keep the original backup and [previous installer](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.1.0-alpha.5) until the transfer is verified. Breaking changes are expected during alpha.
@@ -43,7 +45,11 @@ Open a child tree, then use Back and Forward to revisit both locations. The anim
 
 Only open the app if you trust the download. A managed Mac may restrict this option. [Apple’s illustrated Open Anyway guide](https://support.apple.com/en-us/102445) shows the current Privacy & Security screen.
 
-An experimental [Arch Linux x86_64 Preview](docs/ARCH-PREVIEW.md) is available through the Arch Preview workflow when its package and smoke checks pass.
+### Arch Linux x86_64 Preview
+
+Follow the [Arch Preview installation guide](docs/ARCH-PREVIEW.md) to download and verify a pacman package from a successful CI run. The app uses Ctrl for the Command shortcuts described below. Closing the Linux window saves pending work and exits when the save succeeds.
+
+The native smoke test covers local editing and persistence under virtual X11 with Arch WebKitGTK. Linux Wayland, native backup dialogs, upgrades, and account synchronization remain outside the current test coverage.
 
 ## Transfer from alpha.5
 
