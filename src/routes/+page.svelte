@@ -1,5 +1,6 @@
 <script lang="ts">
   import { isTauri } from '@tauri-apps/api/core';
+  import { isLinuxDesktop } from '../lib/platform/desktop-platform';
   import { onMount, tick } from 'svelte';
   import { getAppearance } from '../lib/platform/appearance-context';
   import Workspace from '#lib/components/Workspace.svelte';
@@ -83,7 +84,7 @@
             ? async () => {
                 controller.signal.throwIfAborted();
                 showOpening = true;
-                explainKeychain = true;
+                explainKeychain = !isLinuxDesktop();
                 await tick();
               }
             : undefined,

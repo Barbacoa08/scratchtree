@@ -817,6 +817,7 @@ test('native sign-in explains the Keychain request before sending a code', async
   page,
 }) => {
   await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { value: 'MacIntel' });
     (window as any).isTauri = true;
     (window as any).__TAURI_INTERNALS__ = { invoke: async () => {} };
   });

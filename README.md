@@ -43,6 +43,8 @@ Open a child tree, then use Back and Forward to revisit both locations. The anim
 
 Only open the app if you trust the download. A managed Mac may restrict this option. [Apple’s illustrated Open Anyway guide](https://support.apple.com/en-us/102445) shows the current Privacy & Security screen.
 
+An experimental [Arch Linux x86_64 Preview](docs/ARCH-PREVIEW.md) is available through the Arch Preview workflow when its package and smoke checks pass.
+
 ## Transfer from alpha.5
 
 The BackupV7 converter is a separate maintainer-assisted tool, not part of the app or a public download. Arrange a private conversion with the maintainer before importing an alpha.5 backup. Do not attach notes or backups to public GitHub issues. Keep using the previous installer until the transfer is arranged.

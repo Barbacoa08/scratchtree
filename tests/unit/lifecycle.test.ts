@@ -13,7 +13,7 @@ it('failed close retains window; retry hides, and late listener registration cle
       handler = fn;
       return () => removed++;
     },
-    hide: async () => {
+    finishClose: async () => {
       hidden++;
     },
   };
@@ -41,7 +41,7 @@ it('dispose before close listener resolves unregisters it', async () => {
   const cleanup = attachCloseGuard(
     {
       onCloseRequested: () => new Promise((r) => (resolve = r)),
-      hide: async () => {},
+      finishClose: async () => {},
     },
     async () => true,
     () => {},
@@ -61,7 +61,7 @@ it('remount removes the first close listener before attaching another', async ()
         handlers.delete(fn);
       };
     },
-    hide: async () => {},
+    finishClose: async () => {},
   };
   const first = attachCloseGuard(
     adapter,
@@ -100,7 +100,7 @@ for (const failFollowup of [false, true])
           handler = fn;
           return () => {};
         },
-        hide: async () => {
+        finishClose: async () => {
           hiddenSource = repo.snapshot.drafts.find(
             (d) => d.key === 'compose',
           )?.markdown;
@@ -140,7 +140,7 @@ it('hides only after the newest flush succeeds, never destroys, and deduplicates
       handler = fn;
       return () => {};
     },
-    hide: async () => {
+    finishClose: async () => {
       operations.push('hide');
     },
     destroy: async () => {
@@ -178,7 +178,7 @@ it('does not hide a disposed view when its pending flush completes', async () =>
         handler = fn;
         return () => {};
       },
-      hide: async () => {
+      finishClose: async () => {
         hidden++;
       },
     },
@@ -210,7 +210,7 @@ it('retains the view on hide failure and allows a subsequent close attempt', asy
         handler = fn;
         return () => {};
       },
-      hide: async () => {
+      finishClose: async () => {
         if (++attempts === 1) throw new Error('synthetic hide failure');
       },
     },

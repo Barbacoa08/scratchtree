@@ -1,0 +1,130 @@
+name: Arch Preview
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/arch-preview.yml'
+      - 'packaging/arch/**'
+      - 'tests/native/arch-preview.sh'
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'static/**'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arch-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arch-preview:
+    name: Build and smoke-test on Arch x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      ARCH_WORK: .projects/arch-preview-ci
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          cache: true
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          rustup toolchain install 1.99.1 --profile minimal
+
+      - name: Build the Tauri Preview Debian bundle
+        env:
+          RUSTUP_TOOLCHAIN: 1.99.1
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec tauri build --ci --target x86_64-unknown-linux-gnu \
+            --config src-tauri/tauri.preview.conf.json \
+            --config src-tauri/tauri.arch-preview.conf.json -- --locked
+          mkdir -p "$ARCH_WORK/context" "$ARCH_WORK/evidence" "$ARCH_WORK/package"
+          cp packaging/arch/{Dockerfile,PKGBUILD} tests/native/arch-preview.sh "$ARCH_WORK/context/"
+          debs=(src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          cp "${debs[0]}" "$ARCH_WORK/context/scratchtree-preview.deb"
+          git rev-parse HEAD > "$ARCH_WORK/evidence/source-commit.txt"
+          git rev-parse 'HEAD^{tree}' > "$ARCH_WORK/evidence/source-tree.txt"
+          printf '%s/attempts/%s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            "$GITHUB_RUN_ATTEMPT" > "$ARCH_WORK/evidence/actions-run.txt"
+
+      - name: Package and install in clean Arch stages
+        run: |
+          deb="$ARCH_WORK/context/scratchtree-preview.deb"
+          version=$(dpkg-deb -f "$deb" Version)
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(dpkg-deb -f "$deb" Architecture)" = amd64
+          sha=$(sha256sum "$deb" | cut -d ' ' -f 1)
+          sudo podman build --pull=always \
+            --build-arg "SCRATCHTREE_VERSION=$version" \
+            --build-arg "SCRATCHTREE_DEB_SHA256=$sha" \
+            --tag scratchtree-arch-preview "$ARCH_WORK/context"
+          sudo podman image inspect docker.io/library/archlinux:base --format '{{.Digest}}' \
+            > "$ARCH_WORK/evidence/arch-image-digest.txt"
+
+      - name: Exercise the installed GUI offline
+        run: |
+          # Podman exposes container metadata WebKitGTK uses to detect namespace support.
+          sudo podman run --name scratchtree-arch-smoke --network none --cap-drop ALL \
+            scratchtree-arch-preview
+          sudo podman run --rm --network none --user root scratchtree-arch-preview bash -ec '
+            pacman -R --noconfirm scratchtree-preview
+            test ! -e /usr/bin/scratchtree-preview
+            test ! -e "/usr/share/applications/Scratchtree Preview.desktop"
+          '
+
+      - name: Collect smoke evidence
+        if: always()
+        run: |
+          if sudo podman inspect scratchtree-arch-smoke >/dev/null 2>&1; then
+            sudo podman cp scratchtree-arch-smoke:/home/smoke/evidence/. "$ARCH_WORK/evidence/"
+          fi
+
+      - name: Collect the verified package
+        if: success()
+        run: |
+          sudo podman cp scratchtree-arch-smoke:/package/. "$ARCH_WORK/package/"
+          cp "$ARCH_WORK/evidence/"{actions-run,source-commit,source-tree,arch-image-digest}.txt "$ARCH_WORK/package/"
+          cd "$ARCH_WORK/package"
+          sha256sum -- *.pkg.tar.zst > SHA256SUMS.txt
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arch-preview-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .projects/arch-preview-ci/evidence/
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Upload the verified Preview package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scratchtree-preview-arch-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .projects/arch-preview-ci/package/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14

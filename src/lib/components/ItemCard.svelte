@@ -9,6 +9,7 @@
   import { copyIcon } from '../copy-icon';
   let {
     item,
+    commandLabel,
     selected,
     primary,
     permanent,
@@ -49,6 +50,7 @@
     onmovekey,
   }: {
     item: Item;
+    commandLabel: string;
     selected: boolean;
     primary: boolean;
     permanent: boolean;
@@ -148,7 +150,7 @@
         draggable="true"
         {disabled}
         aria-label="Reorder note"
-        title="Drag to reorder · Command Up/Down"
+        title={`Drag to reorder · ${commandLabel} Up/Down`}
         onclick={onhandleselect}
         {ondragstart}
         {ondragend}

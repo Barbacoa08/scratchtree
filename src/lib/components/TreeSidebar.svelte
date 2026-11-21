@@ -7,6 +7,7 @@
   let {
     presentation,
     showCommandHints = false,
+    commandPrefix = '⌘',
     currentId,
     live = true,
     disabled,
@@ -14,6 +15,7 @@
   }: {
     presentation: HierarchyPresentation;
     showCommandHints?: boolean;
+    commandPrefix?: string;
     currentId: string | null;
     live?: boolean;
     disabled: boolean;
@@ -80,7 +82,8 @@
       >
       {#if showCommandHints && shortcuts.includes(row.tree.id)}<span
           class="command-hint tree-command-hint"
-          aria-hidden="true">⌘{shortcuts.indexOf(row.tree.id) + 2}</span
+          aria-hidden="true"
+          >{commandPrefix}{shortcuts.indexOf(row.tree.id) + 2}</span
         >{/if}
     </div>
   {/each}

@@ -56,6 +56,10 @@ Keep the normal sign-in flow to email and code. Explain any necessary macOS auth
 
 The right panel uses **Status**, covering local saves and cloud synchronization without implying versioned backups. Its signed-out explanation identifies notes and drafts on this Mac; its signed-in explanation covers local saves and cloud sync. Keep the panel compact.
 
+## Arch Linux distribution
+
+An experimental x86_64 pacman package and automated native smoke test are described in the [Arch Preview guide](docs/ARCH-PREVIEW.md). Decide whether to distribute the package through GitHub Releases, maintain an AUR recipe, or add a portable AppImage after desktop acceptance. The Preview scope is signed-out local use.
+
 ## Mobile companions
 
 Mac comes first. Future iOS and Android companions are intended primarily for viewing, copy/paste, and short Markdown capture. Tauri is preferred, with Capacitor as a fallback if mobile friction warrants it. Decide the mobile scope and validate platform/editor constraints separately.

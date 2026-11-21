@@ -20,7 +20,7 @@ export const windowAdapter: CloseAdapter = {
       closeHandler = undefined;
     };
   },
-  async hide() {
+  async finishClose() {
     windowState.hideAttempts++;
     if (windowState.failHide) throw new Error('Synthetic hide failure');
     windowState.hidden++;
