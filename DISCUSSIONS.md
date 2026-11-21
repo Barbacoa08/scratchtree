@@ -58,7 +58,7 @@ The right panel uses **Status**, covering local saves and cloud synchronization 
 
 ## Arch Linux distribution
 
-An experimental x86_64 pacman package and automated native smoke test are described in the [Arch Preview guide](docs/ARCH-PREVIEW.md). Decide whether to distribute the package through GitHub Releases, maintain an AUR recipe, or add a portable AppImage after desktop acceptance. The Preview scope is signed-out local use.
+The first experimental Arch Linux x86_64 Preview is planned as a pacman package alongside the Apple Silicon DMG in one GitHub prerelease. Its accepted scope is signed-out local use, with the native X11 smoke and download procedure documented in the [Arch Preview guide](docs/ARCH-PREVIEW.md). AUR, AppImage, and broader desktop acceptance remain open.
 
 ## Mobile companions
 
