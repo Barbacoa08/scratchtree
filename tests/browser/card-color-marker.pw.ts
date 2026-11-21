@@ -34,13 +34,19 @@ async function expectLineBelow(card: Locator, iconSelector: string) {
         const a = line.getBoundingClientRect();
         const b = icon.getBoundingClientRect();
         return {
-          centered: Math.abs(a.left + a.width / 2 - b.left - b.width / 2) < 1,
+          // The tiny dot paths add a fractional pixel to the artwork bounds.
+          offset:
+            Math.round((b.left + b.width / 2 - a.left - a.width / 2) * 10) / 10,
           gap: a.top > b.bottom,
           vertical: a.height > a.width,
         };
       }, iconSelector),
     )
-    .toEqual({ centered: true, gap: true, vertical: true });
+    .toEqual({
+      offset: iconSelector === '.grip-drawing' ? 1 : 0,
+      gap: true,
+      vertical: true,
+    });
 }
 
 test('the assigned color stays visible on a hovered note and in its inline editor', async ({
@@ -60,7 +66,7 @@ test('the assigned color stays visible on a hovered note and in its inline edito
 
   await body.hover();
   await expect(grip).toHaveCSS('color', 'rgb(98, 189, 196)');
-  await expectLineBelow(card, '.drag-handle svg');
+  await expectLineBelow(card, '.grip-drawing');
   expect(await body.boundingBox()).toEqual(before);
 
   await body.dblclick();
@@ -70,8 +76,34 @@ test('the assigned color stays visible on a hovered note and in its inline edito
   await page.getByRole('button', { name: 'Root', exact: true }).hover();
   await expect(grip).toHaveCSS('opacity', '1');
   await expect(grip).toHaveCSS('color', 'rgb(98, 189, 196)');
-  await expectLineBelow(card, '.drag-handle svg');
+  await expectLineBelow(card, '.grip-drawing');
   await expect(cards.last().locator('.note-color')).toHaveCount(0);
+});
+
+test('shifting the colored dots preserves the existing grip hit area', async ({
+  page,
+}) => {
+  const card = (
+    await seed(page, [
+      { markdown: 'First displayed row\nSecond displayed row', color: 'teal' },
+    ])
+  ).first();
+  await card.locator('.note-body').hover();
+  const grip = card.getByRole('button', { name: 'Reorder note' });
+  expect(
+    await grip.evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      const svg = button.querySelector('svg')!.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        bounds.left - 3.75,
+        bounds.top + bounds.height / 2,
+      );
+      return {
+        inset: svg.left - bounds.left,
+        gripsAtEdge: hit?.closest('.drag-handle') === button,
+      };
+    }),
+  ).toEqual({ inset: -4, gripsAtEdge: true });
 });
 
 test('a tree swaps its icon and grip over the same color line', async ({
@@ -93,7 +125,7 @@ test('a tree swaps its icon and grip over the same color line', async ({
 
   await tree.locator('.note-body').hover();
   await expect(tree.locator('.tree-icon')).toBeHidden();
-  await expectLineBelow(tree, '.drag-handle svg');
+  await expectLineBelow(tree, '.grip-drawing');
   expect(await line.boundingBox()).toEqual(idle);
 
   await cards.first().locator('.note-body').hover();
@@ -103,35 +135,69 @@ test('a tree swaps its icon and grip over the same color line', async ({
   await expect(cards.first().locator('.note-color')).toBeHidden();
 });
 
-test('a tree line follows wrapping and the displayed preview', async ({
-  page,
-}) => {
+test('a tree line follows wrapping', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 700 });
-  const cards = await seed(page, [
-    {
-      kind: 'tree',
-      markdown:
-        'A one-line summary becomes two rows when the note stream is narrow enough.',
-      color: 'teal',
-    },
-    {
-      kind: 'tree',
-      markdown: 'First\nSecond\nThird\nFourth\nFifth\nSixth',
-      color: 'teal',
-    },
-  ]);
-  const wraps = cards.first();
-  await expect(wraps.locator('.note-color')).toBeHidden();
+  const tree = (
+    await seed(page, [
+      {
+        kind: 'tree',
+        markdown:
+          'A one-line summary becomes two rows when the note stream is narrow enough.',
+        color: 'teal',
+      },
+    ])
+  ).first();
+  await expect(tree.locator('.note-color')).toBeHidden();
   await page.setViewportSize({ width: 640, height: 700 });
-  await expectLineBelow(wraps, '.tree-icon');
-
-  const long = cards.last();
-  await expect(long.locator('.note-color')).toBeHidden();
-  await long.getByRole('button', { name: 'Expand note' }).click();
-  await expectLineBelow(long, '.tree-icon');
-  await long.getByRole('button', { name: 'Collapse note' }).click();
-  await expect(long.locator('.note-color')).toBeHidden();
+  await expectLineBelow(tree, '.tree-icon');
 });
+
+for (const kind of ['note', 'tree'] as const) {
+  test(`a colored ${kind} line runs beside both disclosure controls to the card inset`, async ({
+    page,
+  }) => {
+    const markdown = 'First\nSecond\nThird\nFourth\nFifth\nSixth';
+    const cards = await seed(page, [
+      { kind, markdown, color: 'teal' },
+      { kind, markdown },
+    ]);
+    const card = cards.first();
+    await expect(cards.last().locator('.note-color')).toHaveCount(0);
+
+    const actions = ['Expand note', 'Collapse note', 'Expand note'];
+    for (const [index, action] of actions.entries()) {
+      await page.mouse.move(0, 0);
+      const disclosure = card.getByRole('button', {
+        name: action,
+        exact: true,
+      });
+      await expect(disclosure).toBeVisible();
+      await expect(card.locator('.note-color')).toBeVisible();
+      await expect
+        .poll(() =>
+          card.evaluate((node) => {
+            const line = node
+              .querySelector('.note-color')!
+              .getBoundingClientRect();
+            const button = node
+              .querySelector('.note-expand')!
+              .getBoundingClientRect();
+            const cardBottom = node.getBoundingClientRect().bottom;
+            const inset = cardBottom - line.bottom;
+            return (
+              line.right < button.left &&
+              line.bottom >= button.bottom &&
+              inset >= 6 &&
+              inset <= 9
+            );
+          }),
+        )
+        .toBe(true);
+      if (kind === 'tree') await expectLineBelow(card, '.tree-icon');
+      if (index < actions.length - 1) await disclosure.click();
+    }
+  });
+}
 
 test('an inline editor only adds the tail when a second row can be seen', async ({
   page,
@@ -145,7 +211,7 @@ test('an inline editor only adds the tail when a second row can be seen', async 
   await expect(card.locator('.note-color')).toBeHidden();
   await editor.press('End');
   await editor.press('Shift+Enter');
-  await expectLineBelow(card, '.drag-handle svg');
+  await expectLineBelow(card, '.grip-drawing');
   await editor.press('Backspace');
   await expect(card.locator('.note-color')).toBeHidden();
   await expect(editor).toBeFocused();
@@ -162,7 +228,7 @@ test('a wrapped whitespace-only edit still displays two rows', async ({
   const editor = page.getByRole('textbox', { name: 'Edit Markdown' });
   await editor.press('Meta+a');
   await page.keyboard.insertText(' '.repeat(175));
-  await expectLineBelow(card, '.drag-handle svg');
+  await expectLineBelow(card, '.grip-drawing');
 });
 
 test('a one-row editor hides wrapped source above the viewport', async ({
@@ -172,7 +238,7 @@ test('a one-row editor hides wrapped source above the viewport', async ({
   const card = (
     await seed(page, [
       {
-        markdown: `[Short link](#${'very-long-path-'.repeat(17)})\nSecond\nThird\nFourth\nFifth\nSixth`,
+        markdown: `[Short link](#${'very-long-path-'.repeat(17)})`,
         color: 'teal',
       },
     ])
@@ -183,8 +249,12 @@ test('a one-row editor hides wrapped source above the viewport', async ({
     page.getByRole('textbox', { name: 'Edit Markdown' }),
   ).toBeFocused();
   await card.locator('.cm-scroller').evaluate((node) => {
-    node.scrollTop = 20;
+    node.scrollTop = node.scrollHeight;
   });
+  await expect
+    .poll(() => card.locator('.cm-scroller').evaluate((node) => node.scrollTop))
+    .toBeGreaterThan(0);
+  await expect(card.locator('.note-expand')).toHaveCount(0);
   await page.setViewportSize({ width: 761, height: 850 });
   await page.evaluate(
     () =>

@@ -153,14 +153,21 @@
         {ondragstart}
         {ondragend}
         onkeydown={onmovekey}
-        ><span aria-hidden="true"
-          ><svg viewBox="0 0 16 16"
-            ><path
-              d="M5 3h.01M11 3h.01M5 8h.01M11 8h.01M5 13h.01M11 13h.01"
-            /></svg
-          ></span
-        ></button
-      >{/if}
+      >
+        <span aria-hidden="true">
+          <svg class="drag-icon">
+            <svg
+              class="grip-drawing"
+              viewBox="0 0 16 16"
+              width="100%"
+              height="100%"
+              x={item.color ? 1 : 0}
+            >
+              <path d="M5 3h.01M11 3h.01M5 8h.01M11 8h.01M5 13h.01M11 13h.01" />
+            </svg>
+          </svg>
+        </span>
+      </button>{/if}
   </div>
   {#if item.done}<span class="sr-only">Done</span>{/if}
   <div class="note-meta">
