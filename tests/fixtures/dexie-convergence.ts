@@ -319,7 +319,75 @@ export async function run(scenario: string) {
       }
       return 'ok';
     }
-    if (
+    if (scenario === 'engine-quiet-status') {
+      const h = await remoteHarness(db, repo);
+      const states: string[] = [];
+      h.engine.subscribe((state) => states.push(state.state));
+      try {
+        await h.engine.retry();
+        assert(
+          states.includes('syncing') && h.state.state === 'up-to-date',
+          'initial shared confirmation is visible',
+        );
+        const initial = h.state.lastConfirmed;
+        states.length = 0;
+        h.advance();
+        await repo.checkpointDraft('compose', 'local draft 雪', 1);
+        await h.engine.retry();
+        assert(
+          !states.some((state) => state !== 'up-to-date') &&
+            h.state.lastConfirmed === initial,
+          'a device-only checkpoint does not reannounce sync',
+        );
+
+        states.length = 0;
+        await repo.saveItemSource(id, 'real shared change', {
+          key: id,
+          revision: 1,
+        });
+        await h.publishWitnesses();
+        h.server.notes = await db.notes.toArray();
+        await h.engine.retry();
+        assert(
+          states.includes('syncing') && h.state.lastConfirmed !== initial,
+          'a new shared save still announces its confirmation',
+        );
+        const confirmed = h.state.lastConfirmed;
+        states.length = 0;
+        h.advance();
+        const receiptMarkers = db.device
+          .where('key')
+          .startsWith('resolved-witness:');
+        assert(
+          (await receiptMarkers.count()) > 0,
+          'receipt cleanup is pending',
+        );
+        h.server.witnesses.clear();
+        await h.engine.retry();
+        assert(
+          !states.some((state) => state !== 'up-to-date') &&
+            h.state.lastConfirmed === confirmed &&
+            (await receiptMarkers.count()) === 0,
+          'retiring the receipt marker stays quiet',
+        );
+
+        states.length = 0;
+        h.hook(async () => {
+          await db.notes.update([epoch, id], {
+            markdown: 'changed during check',
+          });
+        });
+        await h.engine.retry();
+        assert(
+          states.includes('syncing') &&
+            states.at(-1) === 'needs-sync' &&
+            h.state.lastConfirmed === confirmed,
+          'a same-epoch change during a quiet turn requires fresh evidence',
+        );
+      } finally {
+        h.engine.close();
+      }
+    } else if (
       scenario === 'fix2-mixed-source' ||
       scenario === 'fix2-mixed-unrelated'
     ) {

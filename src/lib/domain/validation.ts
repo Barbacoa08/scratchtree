@@ -23,6 +23,19 @@ const invalid = (
 ): AppError => ({ code: 'invalid_backup', message });
 /** Validate an in-memory snapshot independently of any backup file format. */
 export function validateSnapshot(value: unknown): WorkspaceSnapshot | AppError {
+  const snapshot = validateSnapshotStructure(value);
+  if ('code' in snapshot) return snapshot;
+  if (bytes(JSON.stringify(snapshot)) > MAX_ENVELOPE)
+    return invalid(
+      'Backup exceeds the 10 MiB capacity. The original is retained.',
+    );
+  return snapshot;
+}
+
+/** Validate fields and references when the containing backup supplies the byte limit. */
+export function validateSnapshotStructure(
+  value: unknown,
+): WorkspaceSnapshot | AppError {
   const s = value;
   if (
     !record(s) ||
@@ -129,9 +142,5 @@ export function validateSnapshot(value: unknown): WorkspaceSnapshot | AppError {
     s.undoDeleteIds.some((id) => !uuid(id) || index.get(id)?.deletedAt == null)
   )
     return invalid();
-  if (bytes(JSON.stringify(s)) > MAX_ENVELOPE)
-    return invalid(
-      'Backup exceeds the 10 MiB capacity. The original is retained.',
-    );
   return s as unknown as WorkspaceSnapshot;
 }

@@ -53,9 +53,7 @@ export class SyncEngine implements SyncPort {
   private scheduled = false;
   private rerun = false;
   private started = false;
-  private baseline = false;
-  private baselineEpoch: string | null = null;
-  private baselineShared: SharedEnvelope | null = null;
+  private baseline: { shared: SharedEnvelope; key: string } | null = null;
   private active: AbortController | null = null;
   private generation = 0;
   private scanAfter = 0;
@@ -220,7 +218,7 @@ export class SyncEngine implements SyncPort {
       return;
     }
     const currentEpoch = await repository.readCurrentEpoch();
-    if (this.baselineEpoch !== currentEpoch) this.baseline = false;
+    if (this.baseline?.shared.epoch !== currentEpoch) this.baseline = null;
     const user = db.cloud.currentUser.getValue(),
       databaseUrl = db.cloud.options?.databaseUrl;
     if (
@@ -238,7 +236,20 @@ export class SyncEngine implements SyncPort {
       });
       return;
     }
-    this.patch({ state: 'syncing', detail: null, recoveries });
+    const announceSync = () => {
+      if (this.state.state !== 'syncing')
+        this.patch({ state: 'syncing', detail: null, recoveries });
+    };
+    // Receipt cleanup and device-only changes can schedule a turn without
+    // changing the previously confirmed shared view.
+    if (
+      this.state.state !== 'up-to-date' ||
+      local.pendingCount !== 0 ||
+      !this.baseline ||
+      local.shared.epoch !== currentEpoch ||
+      this.baseline.key !== sharedKey(local.shared)
+    )
+      announceSync();
     const options = {
       databaseUrl,
       token: user.accessToken,
@@ -248,13 +259,16 @@ export class SyncEngine implements SyncPort {
     try {
       if (
         (await readRemoteEpoch(options, repository.libraryId)) !== currentEpoch
-      )
-        this.baseline = false;
-      let proof = this.baseline ? this.baselineShared : null;
+      ) {
+        this.baseline = null;
+        announceSync();
+      }
+      let proof = this.baseline?.shared ?? null;
       let serverView: RemoteLibrary | null = null;
       const ordered = orderedIntents(await db.pending.toArray()).filter(
         (p) => p.localApplied,
       );
+      if (ordered.length) announceSync();
       let unvisited = ordered.filter((p) => p.sequence > this.scanAfter);
       if (!unvisited.length) {
         this.scanAfter = 0;
@@ -273,7 +287,7 @@ export class SyncEngine implements SyncPort {
         const result = await classifyOutcome(p, witness, remote);
         if (remote.shared) {
           serverView = remote;
-          this.baseline = false;
+          this.baseline = null;
           proof = null;
         }
         // A complete view is evidence only until a later observation contradicts it.
@@ -291,7 +305,7 @@ export class SyncEngine implements SyncPort {
             serverView = null;
         }
         if (result === 'superseded') {
-          this.baseline = false;
+          this.baseline = null;
           proof = null;
           serverView = null;
         } else if (result === 'matching' && remote.observed && proof) {
@@ -312,7 +326,7 @@ export class SyncEngine implements SyncPort {
               ),
             };
           else {
-            this.baseline = false;
+            this.baseline = null;
             proof = null;
             serverView = null;
           }
@@ -355,13 +369,17 @@ export class SyncEngine implements SyncPort {
         : '';
       let final = await this.confirmableView();
       if (!final) return false;
+      let finalKey = sharedKey(final.shared);
+      const baseline = this.baseline;
       let evidenced = !!(
-        this.baseline &&
+        baseline &&
         proof &&
-        this.baselineEpoch === final.shared.epoch &&
-        sharedKey(proof) === sharedKey(final.shared)
+        baseline.shared.epoch === final.shared.epoch &&
+        (proof === baseline.shared ? baseline.key : sharedKey(proof)) ===
+          finalKey
       );
       if (!evidenced) {
+        announceSync();
         const remote =
           serverView ??
           (await readRemoteLibrary({
@@ -371,17 +389,18 @@ export class SyncEngine implements SyncPort {
           }));
         final = await this.confirmableView();
         if (!final) return false;
+        finalKey = sharedKey(final.shared);
         evidenced = !!(
           remote.shared &&
           remote.epoch === final.shared.epoch &&
-          sharedKey(remote.shared) === sharedKey(final.shared) &&
+          sharedKey(remote.shared) === finalKey &&
           canonicalJson(remote.items) === canonicalJson(final.items) &&
           canonicalJson(remote.purgedIds) === canonicalJson(final.purgedIds)
         );
       }
-      this.baseline = evidenced;
-      this.baselineShared = evidenced ? final.shared : null;
-      this.baselineEpoch = evidenced ? final.shared.epoch : null;
+      this.baseline = evidenced
+        ? { shared: final.shared, key: finalKey }
+        : null;
       const remaining = final.pendingCount;
       if (this.closed || signal.aborted) return false;
       this.patch({
@@ -393,7 +412,7 @@ export class SyncEngine implements SyncPort {
               ? 'Alternative input is retained in recovery.'
               : null,
         recoveries: final.recoveries,
-        ...(!remaining && this.baseline
+        ...(!remaining && this.baseline && this.state.state === 'syncing'
           ? { lastConfirmed: this.options.now?.() ?? Date.now() }
           : {}),
       });
@@ -412,7 +431,8 @@ export class SyncEngine implements SyncPort {
   private async confirmableView() {
     const assessment = await this.options.repository.assessView();
     if (assessment.kind === 'ready') {
-      this.patch({ overflow: undefined });
+      if (this.state.overflow !== undefined)
+        this.patch({ overflow: undefined });
       return assessment;
     }
     const shared = assessment.kind === 'shared-capacity';
