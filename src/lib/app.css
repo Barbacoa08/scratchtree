@@ -1382,9 +1382,16 @@ html[data-theme='light'] .note-card[data-colored='true'] {
 .note-card[data-colored='true'] .item-slot :is(.note-select, .drag-handle) {
   color: var(--item-marker-color);
 }
-/* The outer SVG keeps its hit area when the colored dots move. */
-.note-card[data-colored='true'] .item-slot :is(.tree-icon, .drag-icon) {
+/* Align tree artwork with the color line and preserve the colored note grip. */
+.note-card[data-kind='tree'] .item-slot :is(.tree-icon, .drag-icon),
+.note-card[data-colored='true'] .item-slot .drag-icon {
   transform: translateX(-0.4375rem);
+}
+/* Keep the shifted uncolored artwork within the original button hit areas. */
+.note-card[data-kind='tree'][data-colored='false']
+  .item-slot
+  :is(.tree-icon, .drag-icon) {
+  pointer-events: none;
 }
 .drag-handle .grip-drawing {
   pointer-events: none;
