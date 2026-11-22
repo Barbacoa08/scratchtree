@@ -53,7 +53,7 @@ Only open the app if you trust the download. A managed Mac may restrict this opt
 
 ### Arch Linux x86_64 Preview
 
-[Download Scratchtree v0.2.7 for Arch Linux x86_64](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.7/scratchtree-preview-0.2.7-1-x86_64.pkg.tar.zst) · [Installation and checksum verification](docs/ARCH-PREVIEW.md). The app uses Ctrl for the Command shortcuts described below. Closing the Linux window saves pending work and exits when the save succeeds.
+[Download Scratchtree v0.2.8 for Arch Linux x86_64](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.8/scratchtree-preview-0.2.8-1-x86_64.pkg.tar.zst) · [Installation and checksum verification](docs/ARCH-PREVIEW.md). The app uses Ctrl for the Command shortcuts described below. Closing the Linux window saves pending work and exits when the save succeeds.
 
 The native smoke test covers local editing and persistence under virtual X11 with Arch WebKitGTK. Linux Wayland, native backup dialogs, upgrades, and account synchronization remain outside the current test coverage.
 
