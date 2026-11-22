@@ -37,21 +37,6 @@ export function hierarchyIndex(items: Item[]): Map<string, Item> {
   }
   return byId;
 }
-export function treePath(trees: Item[], id: string | null): Item[] {
-  const byId = hierarchyIndex(trees),
-    path: Item[] = [];
-  while (id !== null) {
-    const tree = byId.get(id);
-    if (!tree) throw new Error('Missing tree.');
-    path.push(tree);
-    id = tree.parentId;
-  }
-  return path.reverse();
-}
-/** Convenience for isolated calls; views reuse one presentation per tree snapshot. */
-export const locationLabel = (trees: Item[], id: string | null): string =>
-  createHierarchyPresentation(trees).label(id).text;
-export type StreamEntry = Item;
 export function itemLabel(item: Item): string {
   const line = item.markdown.split(/\r\n|\r|\n/, 1)[0].trim();
   const points: string[] = [];
@@ -150,10 +135,6 @@ function visibleRows(
   }
   return rows;
 }
-export function sidebarRows(trees: Item[], expanded: Set<string>): TreeRow[] {
-  hierarchyIndex(trees);
-  return visibleRows(treeChildren(trees), expanded);
-}
 export interface LocationLabel {
   text: string;
   abbreviated: boolean;
@@ -231,13 +212,4 @@ export function createHierarchyPresentation(
       return visibleRows(children, expanded);
     },
   };
-}
-/** One pass avoids rescanning the workspace for each visible tree card. */
-export function entryCounts(s: WorkspaceSnapshot): Map<string | null, number> {
-  const counts = new Map<string | null, number>();
-  const scopes = scopeIndex(s.items);
-  for (const item of s.items)
-    if (scopes.get(item.id) === 'live')
-      counts.set(item.parentId, (counts.get(item.parentId) ?? 0) + 1);
-  return counts;
 }

@@ -116,14 +116,14 @@ test('per-location capture caret and undo survive navigation', async ({
   await expect(capture(page)).toBeFocused();
   await page.keyboard.insertText('X');
   await expect(capture(page)).toHaveText('HomXe');
-  await page.keyboard.press('Meta+z');
+  await page.keyboard.press('ControlOrMeta+z');
   await expect(capture(page)).toHaveText('Home');
   const away = page.locator(`[data-entry-id="${awayId}"]`);
   await expect(away).toHaveAttribute('data-kind', 'note');
   await away.click();
   await page.keyboard.press('ArrowRight');
   await expect(capture(page)).toHaveText('Away draft');
-  await capture(page).press('Meta+z');
+  await capture(page).press('ControlOrMeta+z');
   await expect(capture(page)).toHaveText('');
 });
 
@@ -231,7 +231,7 @@ test('successful restore resets capture undo even when restored source equals th
     .getByRole('button', { name: 'Replace library', exact: true })
     .click();
   await expect(capture(page)).toBeFocused();
-  await page.keyboard.press('Meta+z');
+  await page.keyboard.press('ControlOrMeta+z');
   await expect(capture(page)).toHaveText('same restored source');
 });
 
