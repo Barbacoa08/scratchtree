@@ -66,7 +66,7 @@ Mac comes first. Future iOS and Android companions are intended primarily for vi
 
 ## Developer ID signing and notarization
 
-**Accepted.** Use local Developer ID signing with Keychain-held credentials, Apple notarization, and a stapled ticket for the direct-download Apple Silicon DMG. Each new package goes through the [release guide](docs/RELEASING.md). Keep the first candidate private until clean installation and the supported signed-in upgrade from the ad-hoc release are verified. The current public DMG still uses the ad-hoc app signature and its existing opening instructions. Track the transition in [issue #6](https://github.com/Barbacoa08/scratchtree/issues/6).
+**Accepted.** Use local Developer ID signing with Keychain-held credentials, Apple notarization, and a stapled ticket for the direct-download Apple Silicon DMG. Each new package goes through the [release guide](docs/RELEASING.md). Version 0.2.8 is the first public Developer ID-signed and notarized Mac download. The maintainer verified clean installation and exercised the upgrade from the public ad-hoc 0.2.8 build in a signed-in smoke test. Track the transition in [issue #6](https://github.com/Barbacoa08/scratchtree/issues/6).
 
 ## Desktop updates
 

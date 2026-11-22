@@ -41,15 +41,13 @@ Use **Export backup**, then **Download backup**, to keep a separate BackupV8 fil
 
 **Alpha compatibility:** version 0.2.8 uses persistent Dexie IndexedDB, BackupV8, and the release identity introduced in 0.2.0. Updating from 0.2.0 through 0.2.7 retains that identity and format. The release uses a separate local profile from earlier alphas and never automatically reads an older store. Before updating from the local-only alpha.5, export and retain its unchanged BackupV7, convert a copy with the separate local transfer tool, and verify the import and a fresh export. Signing in does not transfer those old local notes. Keep the original backup and [previous installer](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.1.0-alpha.5) until the transfer is verified. Breaking changes are expected during alpha.
 
-[Download Scratchtree v0.2.8 for Apple Silicon](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.8/Scratchtree_0.2.8_aarch64.dmg) · [Release notes](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.2.8)
+[Download Scratchtree v0.2.8 for Apple Silicon](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.8/Scratchtree_0.2.8_aarch64.dmg) · [SHA-256 checksum](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.8/SHA256SUMS.txt) · [Release notes](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.2.8)
 
 1. Export a backup before updating, and quit older app copies. The older alpha.5 uses a different backup format: prepare a converted BackupV8 copy before importing it into 0.2.8. See [Transfer from alpha.5](#transfer-from-alpha5) below.
 2. Open the downloaded DMG, drag Scratchtree to Applications, and replace the existing app if prompted. Your app data is stored separately from the app.
-3. Open Scratchtree from Applications. The linked Mac build uses an ad-hoc signature, so macOS may block the first launch. The first Developer ID-signed and notarized download is pending private acceptance and publication.
-4. If macOS blocks Scratchtree because it can’t verify the developer, click **Done**. Open **System Settings → Privacy & Security**, scroll to **Security**, and choose **Open Anyway** for Scratchtree.
-5. Authenticate if prompted, and confirm **Open**.
+3. Open Scratchtree from Applications. The linked DMG is Developer ID-signed and notarized. If macOS asks you to confirm that you want to open an app downloaded from the internet, click **Open**.
 
-Only open the app if you trust the download. A managed Mac may restrict this option. [Apple’s illustrated Open Anyway guide](https://support.apple.com/en-us/102445) shows the current Privacy & Security screen.
+To verify the download, save the checksum file beside the DMG and run `shasum -a 256 -c SHA256SUMS.txt` in that folder.
 
 ### Arch Linux x86_64 Preview
 
