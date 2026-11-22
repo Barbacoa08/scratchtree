@@ -6,7 +6,7 @@ import {
   type Item,
   type WorkspaceSnapshot,
 } from '../domain/notes';
-import { uuid, validateSnapshot } from '../domain/validation';
+import { uuid, validateSnapshotStructure } from '../domain/validation';
 
 type RecoveryFacts = {
   id: string;
@@ -84,13 +84,24 @@ function validRecovery(value: unknown): value is RecoveryRecord {
   if (value.kind === 'library')
     return (
       fields(value, [...common, 'snapshot']) &&
-      !('code' in validateSnapshot(value.snapshot))
+      !('code' in validateSnapshotStructure(value.snapshot))
     );
   return false;
 }
 export function validateCloudBackup(text: string): BackupV8 | AppError {
   if (bytes(text) > MAX_ENVELOPE)
     return invalid('Backup exceeds the 10 MiB capacity.');
+  const backup = decodeCloudBackup(text);
+  if ('code' in backup) return backup;
+  if (bytes(JSON.stringify(backup)) > MAX_ENVELOPE)
+    return invalid(
+      'Backup exceeds the 10 MiB capacity. The original is retained.',
+    );
+  return backup;
+}
+
+/** Decode the exact JSON payload after the caller has checked its input size. */
+function decodeCloudBackup(text: string): BackupV8 | AppError {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -119,7 +130,7 @@ export function validateCloudBackup(text: string): BackupV8 | AppError {
     !Array.isArray(device.recovery)
   )
     return invalid();
-  const snapshot = validateSnapshot({
+  const snapshot = validateSnapshotStructure({
     items: library.items,
     drafts: device.drafts,
     undoDeleteIds: device.undoDeleteIds,
@@ -142,10 +153,6 @@ export function validateCloudBackup(text: string): BackupV8 | AppError {
       return invalid();
     recovery.add(entry.id.toLowerCase());
   }
-  if (bytes(JSON.stringify(value)) > MAX_ENVELOPE)
-    return invalid(
-      'Backup exceeds the 10 MiB capacity. The original is retained.',
-    );
   return value as unknown as BackupV8;
 }
 export class LibraryCapacityError extends Error {}
@@ -161,7 +168,7 @@ export function encodeCloudBackup(
   });
   if (bytes(text) > MAX_ENVELOPE)
     throw new LibraryCapacityError('Backup exceeds the 10 MiB capacity.');
-  const checked = validateCloudBackup(text);
+  const checked = decodeCloudBackup(text);
   if ('code' in checked) throw new Error(checked.message);
   return text;
 }

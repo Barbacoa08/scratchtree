@@ -63,7 +63,11 @@ import {
   type ItemFieldDeltas,
 } from './intents';
 import type { SharedItem, OrderRow, Placement } from './types';
-const equal = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
+const equal = (a: unknown, b: unknown) =>
+  a === b || canonicalJson(a) === canonicalJson(b);
+// Both items have passed the same strict field validation.
+const sameItem = (a: Item, b: Item) =>
+  (Object.keys(a) as (keyof Item)[]).every((key) => equal(a[key], b[key]));
 const bytes = (x: unknown) =>
   new TextEncoder().encode(JSON.stringify(x)).length;
 const providerFields = <T>(row: T): T => {
@@ -376,6 +380,9 @@ export class DexieRepository implements Repository {
     const markers: DeviceRow[] = [];
     const marker = (await this.db.device.get(this.viewKey()))?.value as
       { epoch: string; snapshot: WorkspaceSnapshot } | undefined;
+    // read() already validated this view before any adoption work.
+    if (!rawInputs.length && (!marker || marker.epoch === current.epoch))
+      return markers;
     if (
       marker &&
       marker.epoch !== current.epoch &&
@@ -544,14 +551,13 @@ export class DexieRepository implements Repository {
         await retainRawBuffers(this.db, captured, originEpoch);
         throw error;
       }
+      const currentIds = new Set(state.snapshot.items.map((item) => item.id));
       return {
         workspace: state.snapshot,
         originEpoch,
         replaced: originEpoch !== state.epoch,
         removedIds: (marker?.snapshot.items ?? [])
-          .filter(
-            (item) => !state.snapshot.items.some((next) => next.id === item.id),
-          )
+          .filter((item) => !currentIds.has(item.id))
           .map((item) => item.id),
       };
     });
@@ -1011,7 +1017,7 @@ export class DexieRepository implements Repository {
     for (const id of new Set([...old.keys(), ...next.keys()])) {
       const previous = old.get(id),
         value = next.get(id);
-      if (equal(previous, value)) continue;
+      if (previous && value && sameItem(previous, value)) continue;
       const structural = (item: Item) =>
         rules.structuralItems({
           items: [item],
@@ -1133,6 +1139,7 @@ export class DexieRepository implements Repository {
         await this.db.notes.add(share(item, after.epoch));
         continue;
       }
+      if (sameItem(old, item)) continue;
       const from = share(old, after.epoch),
         to = share(item, after.epoch);
       const changes: Record<string, unknown> = {};
@@ -1215,7 +1222,11 @@ export class DexieRepository implements Repository {
       )
         throw stale();
       after.purgedIds = [...new Set([...after.purgedIds, ...removedIds])];
-      if (!pending && equal(before.snapshot.items, after.snapshot.items))
+      if (
+        candidates.length &&
+        !pending &&
+        equal(before.snapshot.items, after.snapshot.items)
+      )
         pending = candidates.find((x) =>
           this.outcomeMatches(before, x.expected, x.command),
         );

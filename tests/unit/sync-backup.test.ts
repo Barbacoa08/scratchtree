@@ -350,6 +350,12 @@ describe('strict current-only portable cloud backup', () => {
     expect(() =>
       encodeCloudBackup({ library: b.library, device: b.device }, exportedAt),
     ).toThrow();
+    recovery.markdown = '\ud800' + recovery.markdown.slice(6);
+    const compact = JSON.stringify(b);
+    const raw = compact.replace('\\ud800', '\ud800');
+    expect(Buffer.byteLength(compact)).toBe(MAX_ENVELOPE + 1);
+    expect(Buffer.byteLength(raw)).toBeLessThan(MAX_ENVELOPE);
+    expect(validateCloudBackup(raw)).toHaveProperty('code', 'invalid_backup');
   });
   it.each([true, false])(
     'owns the export timestamp when a full validated backup is supplied (explicit: %s)',
@@ -389,5 +395,21 @@ describe('strict current-only portable cloud backup', () => {
     const before = structuredClone(value);
     expect(() => encodeCloudBackup(value, exportedAt)).toThrow();
     expect(value).toEqual(before);
+  });
+  it('serializes the full envelope once when encoding a validated export', () => {
+    const value = input();
+    const stringify = vi.spyOn(JSON, 'stringify');
+    let encoded: string;
+    let librariesSerialized: number;
+    try {
+      encoded = encodeCloudBackup(value, exportedAt);
+      librariesSerialized = stringify.mock.calls.filter(
+        ([candidate]) => candidate?.library || candidate?.items,
+      ).length;
+    } finally {
+      stringify.mockRestore();
+    }
+    expect(librariesSerialized).toBe(1);
+    expect(validateCloudBackup(encoded)).toEqual(envelope());
   });
 });

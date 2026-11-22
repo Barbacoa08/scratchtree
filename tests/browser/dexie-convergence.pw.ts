@@ -27,6 +27,7 @@ for (const scenario of [
   'sequence',
   'convergence',
   'engine-confirmation',
+  'engine-quiet-status',
   'latest-intent',
   'overflow-input',
   'device-tables',
