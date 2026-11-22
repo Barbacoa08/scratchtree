@@ -1,12 +1,15 @@
-import { backupFixture } from '../fixtures/backup';
 import { it, expect } from 'vitest';
-import { validateBackup, encodeBackup } from '../fixtures/backup';
+import {
+  backupFixture,
+  validateBackup,
+  encodeBackup,
+} from '../fixtures/backup';
 import { item } from '../fixtures/items';
 import {
   composeKey,
-  treePath,
+  createHierarchyPresentation,
   directEntries,
-  sidebarRows,
+  scopeIndex,
 } from '../../src/lib/domain/hierarchy';
 import {
   emptyWorkspace,
@@ -44,18 +47,16 @@ it('roundtrips nested ownership and resolves a flat hierarchy and exact compose 
   const checked = validateBackup(encodeBackup(s));
   expect(checked).toHaveProperty('version', 8);
   expect(checked).toEqual(backupFixture(s));
-  expect(
-    treePath(
-      s.items.filter((x) => x.kind === 'tree'),
-      b,
-    ).map((x) => x.markdown),
-  ).toEqual(['Parent', 'Child']);
+  const presentation = createHierarchyPresentation(
+    s.items.filter((x) => x.kind === 'tree'),
+  );
+  expect(presentation.path(b).map((x) => x.markdown)).toEqual([
+    'Parent',
+    'Child',
+  ]);
   expect(directEntries(s, a).map((x) => x.id)).toEqual([b]);
   expect(
-    sidebarRows(
-      s.items.filter((x) => x.kind === 'tree'),
-      new Set([a]),
-    ).map((x) => [x.tree.id, x.depth]),
+    presentation.rows(new Set([a])).map((x) => [x.tree.id, x.depth]),
   ).toEqual([
     [a, 0],
     [b, 1],
@@ -78,25 +79,22 @@ it('validates a 10000 deep chain without recursion or quadratic ancestor scans',
   }
   expect(validateBackup(encodeBackup(s))).toHaveProperty('version', 8);
   expect(
-    treePath(
-      s.items.filter((x) => x.kind === 'tree'),
-      s.items.at(-1)!.id,
-    ),
+    createHierarchyPresentation(s.items).path(s.items.at(-1)!.id),
   ).toHaveLength(10000);
 });
-it('counts direct active entries once for tree cards, including deletion timestamp zero', async () => {
-  const policy = await import('../../src/lib/domain/hierarchy');
-  expect(policy).toHaveProperty('entryCounts');
+it('assigns an explicit zero deletion timestamp to Trash, not Root', () => {
   const s = workspace();
-  s.items.push(
-    item({
-      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-      deletedAt: 0,
-      position: 0,
-    }),
-  );
-  expect(policy.entryCounts(s).get(b)).toBe(1);
-  expect(policy.entryCounts(s).get(a)).toBe(1);
+  const deleted = item({
+    id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    deletedAt: 0,
+    position: 0,
+  });
+  s.items.push(deleted);
+  expect(scopeIndex(s.items).get(deleted.id)).toBe('trash');
+  expect(directEntries(s, { scope: 'live', itemId: null })).toEqual([
+    s.items[0],
+  ]);
+  expect(directEntries(s, { scope: 'trash', itemId: null })).toEqual([deleted]);
 });
 
 it('accepts 200 Unicode code points and all 20001 legal draft contexts', () => {

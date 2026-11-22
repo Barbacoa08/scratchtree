@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import * as hierarchy from '../../src/lib/domain/hierarchy';
+import { createHierarchyPresentation } from '../../src/lib/domain/hierarchy';
 import {
   emptyWorkspace,
   type WorkspaceSnapshot,
@@ -37,10 +37,9 @@ it('bounds one deep displayed source location instead of emitting its complete a
   expect(validateBackup(text)).toHaveProperty('version', 8);
   expect(
     Array.from(
-      hierarchy.locationLabel(
+      createHierarchyPresentation(
         s.items.filter((x) => x.kind === 'tree'),
-        s.items.at(-1)!.parentId,
-      ),
+      ).label(s.items.at(-1)!.parentId).text,
     ).length,
   ).toBeLessThanOrEqual(96);
 });
@@ -48,7 +47,7 @@ it('reuses bounded owner resolution for 10000 matches without building full pref
   const s = acceptedDeepWorkspace(),
     trees = s.items.filter((x) => x.kind === 'tree'),
     notes = s.items.filter((x) => x.kind === 'note'),
-    view = hierarchy.createHierarchyPresentation(trees);
+    view = createHierarchyPresentation(trees);
   let sourceReads = 0;
   for (const tree of trees) {
     const markdown = tree.markdown;
@@ -91,14 +90,14 @@ it('keeps ordinary labels exact, handles Unicode boundaries, and rejects missing
       markdown: 'Ideas',
     }),
   ];
-  let view = hierarchy.createHierarchyPresentation(trees);
+  let view = createHierarchyPresentation(trees);
   expect(view.label(trees[1].id)).toMatchObject({
     text: 'Root / Projects / Ideas',
     abbreviated: false,
     depth: 2,
   });
   trees[1] = { ...trees[1], markdown: '😀'.repeat(200) };
-  view = hierarchy.createHierarchyPresentation(trees);
+  view = createHierarchyPresentation(trees);
   expect(Array.from(view.label(trees[1].id).text).length).toBeLessThanOrEqual(
     96,
   );
