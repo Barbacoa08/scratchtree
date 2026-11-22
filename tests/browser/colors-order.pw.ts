@@ -40,6 +40,15 @@ async function order(p: Page) {
     .locator('.note-card')
     .evaluateAll((els) => els.map((el) => el.getAttribute('data-entry-id')));
 }
+async function settleKeyboardOrder(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as any).__test.controller.state.keyboardOrder,
+      ),
+    )
+    .toBeNull();
+}
 async function snapshot(p: Page) {
   return p.evaluate(() =>
     structuredClone((window as any).__test.repo.snapshot),
@@ -93,6 +102,7 @@ test('Command arrows move mixed siblings and preserve selection, children, sourc
   await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
   await expect(card(page, ids[1])).toHaveClass(/selected/);
   await expect(stream(page)).toBeFocused();
+  await settleKeyboardOrder(page);
   const moved = await snapshot(page);
   for (const id of [ids[0], ids[2], ids[3], ids[4], ids[5]])
     expect(moved.items.find((x: any) => x.id === id).updatedAt).toBe(
@@ -341,6 +351,7 @@ test('moves child and Trash sibling groups, preserves handle focus, flushes edit
   await handle.press('Meta+ArrowUp');
   await expect.poll(() => order(page)).toEqual([ids[4], ids[3], ids[5]]);
   await expect(handle).toBeFocused();
+  await settleKeyboardOrder(page);
   expect(
     (await snapshot(page)).items.find((x: any) => x.id === ids[4]),
   ).toMatchObject({ parentId: ids[1], markdown: 'child latest **source**' });
@@ -364,6 +375,7 @@ test('moves child and Trash sibling groups, preserves handle focus, flushes edit
   await card(page, ids[0]).click();
   await page.keyboard.press('Meta+ArrowUp');
   await expect.poll(() => order(page)).toEqual([ids[0], ids[1]]);
+  await settleKeyboardOrder(page);
   await card(page, ids[1]).click();
   await page.keyboard.press('ArrowRight');
   await card(page, ids[5]).click();
@@ -371,7 +383,7 @@ test('moves child and Trash sibling groups, preserves handle focus, flushes edit
   await expect.poll(() => order(page)).toEqual([ids[4], ids[5], ids[3]]);
 });
 
-test('move failure retries original destination after selection changes, without capture or focus theft on newer Search', async ({
+test('keyboard reorder failure retries the original sibling order after selection changes, without capture or focus theft on newer Search', async ({
   page,
 }) => {
   const ids = await seed(page);
@@ -382,14 +394,17 @@ test('move failure retries original destination after selection changes, without
   });
   await page.keyboard.press('Meta+ArrowDown');
   await expect(
-    page.getByRole('button', { name: 'Retry action', exact: true }),
+    page.getByRole('button', { name: 'Retry reorder', exact: true }),
   ).toBeVisible();
   await card(page, ids[2]).click();
   await page.evaluate(() => {
     (window as any).__test.repo.fail = null;
   });
-  await page.getByRole('button', { name: 'Retry action', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Retry reorder', exact: true })
+    .click();
   await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
+  await settleKeyboardOrder(page);
   await expect(capture(page)).toHaveText('pending capture');
   await card(page, ids[0]).click();
   await page.evaluate((id) => {
@@ -754,6 +769,7 @@ test('held hint focus observation tolerates focused-control removal and reorderi
   await handle.press('Meta+ArrowUp');
   await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
   await expect(handle).toBeFocused();
+  await settleKeyboardOrder(page);
   await card(page, ids[0]).click();
   await page.evaluate((id) => {
     const t = (window as any).__test;

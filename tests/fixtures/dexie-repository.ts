@@ -1,3 +1,4 @@
+import { WorkspaceController } from '../../src/lib/workspace/controller';
 import { digest } from '../../src/lib/sync/intents';
 import { ScratchtreeDatabase } from '../../src/lib/sync/database';
 import { DexieRepository } from '../../src/lib/sync/repository';
@@ -86,6 +87,149 @@ export async function run(scenario: string) {
         (await db.pending.count()) === 1 && (await db.witnesses.count()) === 1,
         'durable pending and witness',
       );
+    } else if (scenario === 'keyboard-reorder-reopen') {
+      for (const position of [1, 2, 3, 4, 5])
+        await capture(position, `# **Row ${position}**\r\n- source`);
+      await repo.promoteItem(id(3));
+      await capture(6, 'nested `exact`', { scope: 'live', itemId: id(3) });
+      await repo.checkpointDraft(`compose:${id(3)}`, 'retained draft', 5);
+      const original = await repo.loadWorkspace();
+      const controller = new WorkspaceController(repo);
+      await controller.start();
+      try {
+        assert(
+          controller.stageKeyboardReorder([id(5)], -1),
+          'first tap accepted',
+        );
+        assert(
+          controller.stageKeyboardReorder([id(5)], -1),
+          'second tap accepted',
+        );
+        assert(
+          (await repo.loadWorkspace()).items.find((item) => item.id === id(5))
+            ?.position === 4,
+          'the projected order is independent of storage',
+        );
+        assert(
+          await controller.flush(),
+          'explicit flush acknowledges the net order',
+        );
+      } finally {
+        controller.dispose();
+      }
+      const epoch = await repo.getEpoch();
+      repo.close();
+      db = new ScratchtreeDatabase({ name });
+      repo = new DexieRepository(db, files);
+      const saved = await repo.loadWorkspace();
+      const positions = saved.items
+        .filter((item) => item.parentId === null)
+        .sort((a, b) => a.position - b.position)
+        .map((item) => item.id);
+      assert(
+        JSON.stringify(positions) ===
+          JSON.stringify([id(1), id(2), id(5), id(3), id(4)]),
+        'reopened exact net order',
+      );
+      for (const item of original.items) {
+        const reopened = saved.items.find((current) => current.id === item.id);
+        assert(
+          reopened?.markdown === item.markdown &&
+            reopened.parentId === item.parentId,
+          'exact Markdown and ownership survive reopen',
+        );
+        if (item.parentId !== null)
+          assert(
+            reopened.position === item.position &&
+              reopened.updatedAt === item.updatedAt,
+            'descendant rank and timestamp unchanged',
+          );
+      }
+      assert(
+        JSON.stringify(saved.drafts) === JSON.stringify(original.drafts),
+        'scoped draft survived reopen',
+      );
+      assert((await repo.getEpoch()) === epoch, 'reopened original epoch');
+      assert(
+        (await db.pending.toArray()).filter(
+          (entry) => entry.command.kind === 'moveItems',
+        ).length === 1,
+        'exactly one journaled move',
+      );
+    } else if (
+      scenario === 'keyboard-reorder-epoch' ||
+      scenario === 'keyboard-reorder-dirty-epoch'
+    ) {
+      const dirty = scenario === 'keyboard-reorder-dirty-epoch';
+      await capture(1, 'first original');
+      await capture(2, 'second original');
+      const controller = new WorkspaceController(repo);
+      const other = new DexieRepository(
+        new ScratchtreeDatabase({ name }),
+        files,
+      );
+      try {
+        await controller.start();
+        const generation = controller.state.cacheGeneration;
+        const originalEpoch = await repo.getEpoch();
+        assert(
+          controller.stageKeyboardReorder([id(2)], -1),
+          'original epoch tap',
+        );
+        const replacement = await other.loadWorkspace();
+        replacement.items[1].markdown = 'same ID in the new library';
+        read = encodeCloudBackup({
+          library: { items: replacement.items, purgedIds: [] },
+          device: { drafts: [], undoDeleteIds: [], recovery: [] },
+        });
+        const preview = await other.previewRestore();
+        assert(preview, 'prepare replacement from another binding');
+        await other.confirmRestore(preview.token, true);
+        const replacementEpoch = await other.getEpoch();
+        assert(
+          replacementEpoch !== originalEpoch,
+          'different epoch with same exact IDs',
+        );
+        if (dirty)
+          controller.editSource('retain the original draft before replacing');
+        assert(
+          !(await controller.flush()),
+          'the stale reorder blocks an explicit flush',
+        );
+        assert(
+          await controller.refreshFromRepository(),
+          'acknowledge the replacement through normal refresh',
+        );
+        assert(
+          controller.state.cacheGeneration === generation + 1,
+          'normal refresh must still replace the editor generation',
+        );
+        if (dirty)
+          assert(
+            (await db.recovery.toArray()).some(
+              (entry) =>
+                entry.kind === 'draft' &&
+                entry.originEpoch === originalEpoch &&
+                entry.markdown === 'retain the original draft before replacing',
+            ),
+            'the dirty checkpoint survives in recovery under the original epoch',
+          );
+        assert(
+          controller.state.keyboardOrder === null &&
+            controller.state.keyboardReorderError.includes('replaced'),
+          'original keyboard order is unavailable with an explicit conflict',
+        );
+        assert(
+          controller.state.snapshot.items.find((entry) => entry.id === id(2))
+            ?.markdown === 'same ID in the new library' &&
+            controller.state.snapshot.items.find((entry) => entry.id === id(2))
+              ?.position === 1,
+          'same-ID replacement preserved source and order',
+        );
+      } finally {
+        controller.dispose();
+        other.close();
+      }
     } else if (scenario === 'group-mutations') {
       await capture(1);
       await capture(2);

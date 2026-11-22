@@ -86,8 +86,12 @@ export interface RemoteRefresh {
   originEpoch: string;
 }
 export interface Repository {
+  /** Logical library generation, preserved when only transport changes. */
+  readonly viewEpoch?: string | null;
   refreshFromRemote?(buffers: RemoteBuffer[]): Promise<RemoteRefresh>;
   loadWorkspace(): Promise<WorkspaceSnapshot>;
+  /** Read the current bound epoch without adopting a replacement. */
+  readBoundWorkspace?(epoch: string): Promise<WorkspaceSnapshot>;
   checkpointDraft(
     key: string,
     markdown: string,

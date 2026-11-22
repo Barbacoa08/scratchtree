@@ -7,9 +7,10 @@ const capture = (p: Page) =>
 async function seed(
   p: Page,
   sources = ['first **exact**', 'tree source', 'last `exact`'],
+  fixtureUrl = '/?fixture',
 ) {
   await p.setViewportSize({ width: 1400, height: 900 });
-  await p.goto('/?fixture');
+  await p.goto(fixtureUrl);
   await expect(capture(p)).toBeVisible();
   return p.evaluate(async (sources) => {
     const t = (window as any).__test;
@@ -87,9 +88,104 @@ async function sameNodes(p: Page) {
       ),
   ).toBe(true);
 }
-// Catches pre-ack mutation, absent cosmetic movement, overshoot, identity loss,
-// scroll additions, and source/rank changes beyond the authoritative reorder.
-test('acknowledged keyboard reorder moves real keyed cards through intermediate positions without changing source or viewport', async ({
+test('each keyboard tap moves real cards within the visible feedback budget while a reorder write is held', async ({
+  page,
+}) => {
+  const ids = await seed(page);
+  const selected = card(page, ids[2]);
+  const stream = page.getByRole('region', { name: 'Note stream' });
+  await selected.click();
+  await expect(stream).toBeFocused();
+  await saveNodes(page);
+  await selected.evaluate((element) => {
+    const fixture = (window as any).__test;
+    const move = fixture.repo.moveItems.bind(fixture.repo);
+    fixture.reorderWrites = 0;
+    fixture.repo.moveItems = async (request: any) => {
+      fixture.reorderWrites++;
+      await new Promise<void>((resolve) => {
+        fixture.releaseReorder = resolve;
+      });
+      return move(request);
+    };
+    fixture.firstDisplacement = new Promise<number | null>((resolve) => {
+      function measure(event: KeyboardEvent) {
+        if (
+          event.key !== 'ArrowUp' ||
+          !event.metaKey ||
+          event.repeat ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.isComposing
+        )
+          return;
+        document.removeEventListener('keydown', measure, true);
+        const start = performance.now();
+        const originalY = element.getBoundingClientRect().y;
+        const sample = (now: number) => {
+          if (Math.abs(element.getBoundingClientRect().y - originalY) >= 2)
+            resolve(now - start);
+          else if (now - start >= 120) resolve(null);
+          else requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }
+      document.addEventListener('keydown', measure, true);
+    });
+  });
+  await page.keyboard.down('Meta');
+  try {
+    await page.keyboard.press('ArrowUp');
+    const displacement = await page.evaluate(
+      () => (window as any).__test.firstDisplacement,
+    );
+    expect
+      .soft(displacement, 'milliseconds to first visible displacement')
+      .not.toBeNull();
+    if (displacement !== null)
+      expect.soft(displacement).toBeLessThanOrEqual(100);
+    await test.info().attach('first-visible-feedback', {
+      body: JSON.stringify({ milliseconds: displacement }),
+      contentType: 'application/json',
+    });
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__test.reorderWrites))
+      .toBe(1);
+    await page.keyboard.press('ArrowUp');
+    expect.soft(await order(page)).toEqual([ids[2], ids[0], ids[1]]);
+    expect(
+      await page.evaluate(() =>
+        (window as any).__test.repo.snapshot.items.map(
+          (item: any) => item.position,
+        ),
+      ),
+    ).toEqual([0, 1, 2]);
+    await page.evaluate(() => (window as any).__test.releaseReorder());
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__test.reorderWrites))
+      .toBe(2);
+    await page.evaluate(() => (window as any).__test.releaseReorder());
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as any).__test.repo.snapshot.items.map(
+            (item: any) => item.position,
+          ),
+        ),
+      )
+      .toEqual([1, 2, 0]);
+  } finally {
+    await page.keyboard.up('Meta');
+  }
+  await expect(
+    selected.getByRole('button', { name: 'Select note' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(stream).toBeFocused();
+  await sameNodes(page);
+});
+// Verify cosmetic movement, keyed identity, scroll bounds, and exact saved source.
+test('projected keyboard reorder animates real keyed cards without changing source or viewport', async ({
   page,
 }) => {
   const ids = await seed(page);
@@ -111,18 +207,10 @@ test('acknowledged keyboard reorder moves real keyed cards through intermediate 
   });
   await handle(page, ids[1]).focus();
   await page.keyboard.press('Meta+ArrowUp');
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).__test.controller.state.operation),
-    )
-    .toBe('move');
-  expect(await order(page)).toEqual(ids);
-  expect(await active(page)).toBe(0);
+  await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
   expect(
     await page.evaluate(() => (window as any).__test.repo.snapshot),
   ).toEqual(before);
-  await page.evaluate(() => (window as any).__test.releaseReorder());
-  await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
   await moving(page);
   const samples = await card(page, ids[1]).evaluate((el) => {
     const animation = el.getAnimations()[0];
@@ -144,6 +232,18 @@ test('acknowledged keyboard reorder moves real keyed cards through intermediate 
   await settled(page);
   await sameNodes(page);
   await expect(handle(page, ids[1])).toBeFocused();
+  await expect(handle(page, ids[0])).toBeDisabled();
+  await expect(handle(page, ids[1])).toHaveAttribute('draggable', 'false');
+  await page.waitForFunction(() => (window as any).__test.releaseReorder);
+  await page.evaluate(() => (window as any).__test.releaseReorder());
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as any).__test.controller.state.keyboardOrder,
+      ),
+    )
+    .toBeNull();
+  await expect(handle(page, ids[0])).toBeEnabled();
   const after = await page.evaluate(() => (window as any).__test.repo.snapshot);
   expect(
     after.items.map(({ id, markdown, kind, parentId, done, color }: any) => ({
@@ -169,6 +269,43 @@ test('acknowledged keyboard reorder moves real keyed cards through intermediate 
     await page.locator('.note-stream').evaluate((el) => el.scrollTop),
   ).toBe(0);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+test('native close flushes the optimistic reorder before the debounce expires', async ({
+  page,
+}) => {
+  const ids = await seed(page, undefined, '/?fixture&lifecycle');
+  const outcome = await handle(page, ids[1]).evaluate(async (grip) => {
+    const t = (window as any).__test;
+    const move = t.repo.moveItems.bind(t.repo);
+    let writes = 0;
+    t.repo.moveItems = (request: any) => {
+      writes++;
+      return move(request);
+    };
+    grip.focus();
+    grip.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    const beforeClose = { writes, order: t.controller.state.keyboardOrder };
+    await t.requestClose();
+    return {
+      beforeClose,
+      writes,
+      hidden: t.windowState.hidden,
+      positions: t.repo.snapshot.items.map((item: any) => item.position),
+    };
+  });
+  expect(outcome).toEqual({
+    beforeClose: { writes: 0, order: [ids[1], ids[0], ids[2]] },
+    writes: 1,
+    hidden: 1,
+    positions: [1, 0, 2],
+  });
 });
 test('real sibling drag animates the committed note with one actionable keyed row and no source rewrite', async ({
   page,
@@ -198,7 +335,7 @@ test('real sibling drag animates the committed note with one actionable keyed ro
     ),
   ).toBe('first **exact**');
 });
-test('failed, boundary, source, membership, and search updates create no reorder animation', async ({
+test('failed order is visible with compact retry, while boundary, source, membership, and search updates create no reorder animation', async ({
   page,
 }) => {
   const ids = await seed(page);
@@ -207,13 +344,18 @@ test('failed, boundary, source, membership, and search updates create no reorder
   });
   await handle(page, ids[0]).press('Meta+ArrowDown');
   await expect(page.getByRole('alert')).toContainText('failure');
-  expect(await order(page)).toEqual(ids);
+  expect(await order(page)).toEqual([ids[1], ids[0], ids[2]]);
   await settled(page);
-  await handle(page, ids[0]).press('Meta+ArrowUp');
+  await page.getByRole('button', { name: 'Hide Details' }).click();
+  const retry = page.getByRole('button', { name: 'Retry reorder' });
+  await expect(retry).toBeInViewport();
+  await page.evaluate(() => ((window as any).__test.repo.fail = null));
+  await retry.click();
+  await expect(retry).toHaveCount(0);
+  await handle(page, ids[1]).press('Meta+ArrowUp');
   await settled(page);
   await page.evaluate(async (id) => {
     const t = (window as any).__test;
-    t.repo.fail = null;
     t.controller.editContext(id, 'edited **source**');
     await t.controller.flush();
   }, ids[0]);
@@ -354,9 +496,13 @@ test('delayed reorder never takes newer Search focus, typing, or animates anothe
   await page.evaluate(() => (window as any).__test.releaseCheckpoint());
   await expect
     .poll(() =>
-      page.evaluate(() => (window as any).__test.controller.state.operation),
+      page.evaluate(() =>
+        (window as any).__test.repo.snapshot.items.map(
+          (item: any) => item.position,
+        ),
+      ),
     )
-    .toBeNull();
+    .toEqual([1, 0, 2]);
   await expect(page.getByRole('searchbox')).toBeFocused();
   await expect(page.getByRole('searchbox')).toHaveValue('exact');
   await expect(capture(page)).toHaveText('preserved **draft**');
@@ -386,6 +532,13 @@ test('expanded inline editor geometry, caret, and Undo remain attached to exact 
   await handle(page, ids[1]).press('Meta+ArrowUp');
   await expect.poll(() => order(page)).toEqual([ids[1], ids[0], ids[2]]);
   await settled(page);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as any).__test.controller.state.keyboardOrder,
+      ),
+    )
+    .toBeNull();
   await card(page, ids[1]).dblclick();
   const after = await card(page, ids[1]).locator('.note-body').boundingBox();
   expect(after!.width).toBe(before!.width);

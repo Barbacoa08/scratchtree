@@ -153,6 +153,13 @@ test('noncontiguous Command arrows collect a block and drag inserts the captured
   await expect(
     card(page, ids[1]).getByRole('button', { name: 'Mark done', exact: true }),
   ).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as any).__test.controller.state.keyboardOrder,
+      ),
+    )
+    .toBeNull();
   const transfer = await page.evaluateHandle(() => new DataTransfer());
   await card(page, ids[1])
     .getByRole('button', { name: 'Reorder note', exact: true })
@@ -176,7 +183,6 @@ test('noncontiguous Command arrows collect a block and drag inserts the captured
   ).toEqual([
     [ids[1], ids[3]],
     [ids[1], ids[3]],
-    [ids[1], ids[3]],
   ]);
 });
 
@@ -191,13 +197,15 @@ test('failed group movement retries captured membership after a newer selection 
   });
   await page.keyboard.press('Meta+ArrowUp');
   await expect(
-    page.getByRole('button', { name: 'Retry action', exact: true }),
+    page.getByRole('button', { name: 'Retry reorder', exact: true }),
   ).toBeVisible();
   await card(page, ids[4]).click();
   await page.evaluate(() => {
     (window as any).__test.repo.fail = null;
   });
-  await page.getByRole('button', { name: 'Retry action', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Retry reorder', exact: true })
+    .click();
   await expect
     .poll(() =>
       page
@@ -208,6 +216,13 @@ test('failed group movement retries captured membership after a newer selection 
     )
     .toEqual([ids[1], ids[3], ids[0], ids[2], ids[4]]);
   await expect.poll(() => selected(page)).toEqual([ids[4]]);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as any).__test.controller.state.keyboardOrder,
+      ),
+    )
+    .toBeNull();
   await card(page, ids[1]).click();
   await card(page, ids[3]).click({ modifiers: ['Meta'] });
   await page.evaluate((id) => {

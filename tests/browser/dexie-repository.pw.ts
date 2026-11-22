@@ -36,6 +36,9 @@ const cases = [
   'captured-outcome-clock',
   'purged-latest-input',
   'large-reorder-intent',
+  'keyboard-reorder-reopen',
+  'keyboard-reorder-epoch',
+  'keyboard-reorder-dirty-epoch',
 ] as const;
 for (const scenario of cases)
   test(`real IndexedDB repository: ${scenario}`, async ({ page }) => {

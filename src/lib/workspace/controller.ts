@@ -19,6 +19,7 @@ import {
   directEntries,
 } from '../domain/hierarchy';
 import { filterNotes } from '../domain/search';
+import { reorderSelected } from './mouse-selection';
 import type {
   Repository,
   RemoteBuffer,
@@ -54,8 +55,45 @@ class ChangedGroupDeletion extends Error {}
 type CompletionIntent =
   { id: string; done: boolean } | { ids: string[]; done: boolean };
 
+type KeyboardReorder = {
+  location: Location;
+  epoch: Repository['viewEpoch'];
+  generation: number;
+  ids: readonly string[];
+  before: readonly string[];
+  desired: readonly string[];
+  quiet: { first: number; due: number } | null;
+  attempt: { after: readonly string[]; request: MoveItems | null } | null;
+};
+
+const sameLocation = (a: Location, b: Location) =>
+  a.scope === b.scope && a.itemId === b.itemId;
+const sameOrder = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((id, index) => id === b[index]);
+const changedKeyboardOrder =
+  'The library structure changed before the reorder finished. Review the saved order and reorder again.';
+const replacedKeyboardLibrary =
+  'The library was replaced before the reorder finished. Review the new library before reordering.';
+function isReplacedLibrary(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'library_replaced'
+  );
+}
+function errorMessage(error: unknown) {
+  return typeof error === 'object' && error && 'message' in error
+    ? String(error.message)
+    : '';
+}
+
 export interface ViewState {
   snapshot: WorkspaceSnapshot;
+  keyboardOrder: readonly string[] | null;
+  keyboardReorderIds: readonly string[] | null;
+  keyboardReorderLocation: Location | null;
+  keyboardReorderError: string;
   purgedItemIds: string[];
   cacheGeneration: number;
   ownerId: string | null;
@@ -76,6 +114,10 @@ export interface ViewState {
 export class WorkspaceController {
   state: ViewState = {
     snapshot: emptyWorkspace(),
+    keyboardOrder: null,
+    keyboardReorderIds: null,
+    keyboardReorderLocation: null,
+    keyboardReorderError: '',
     purgedItemIds: [],
     cacheGeneration: 0,
     ownerId: null,
@@ -96,6 +138,9 @@ export class WorkspaceController {
   private listeners = new Set<(s: ViewState) => void>();
   private disposed = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private keyboardReorderTimer: ReturnType<typeof setTimeout> | undefined;
+  private keyboardReorder: KeyboardReorder | null = null;
+  private snapshotEpoch: Repository['viewEpoch'];
   private queue: Promise<unknown> = Promise.resolve();
   private saving: Promise<boolean> | null = null;
   private creating: Promise<boolean> | null = null;
@@ -144,9 +189,7 @@ export class WorkspaceController {
   }
   private error(e: unknown) {
     const safe =
-      typeof e === 'object' && e && 'message' in e
-        ? String(e.message)
-        : 'The local operation failed. Your input is retained.';
+      errorMessage(e) || 'The local operation failed. Your input is retained.';
     this.patch({ error: safe, status: 'Needs retry' });
   }
   private run<T>(fn: () => Promise<T>, allowReplacement = false): Promise<T> {
@@ -165,7 +208,22 @@ export class WorkspaceController {
     this.queue = task.catch(() => {});
     return task;
   }
-  private snapshot(s: WorkspaceSnapshot) {
+  private snapshot(
+    s: WorkspaceSnapshot,
+    presentation: Partial<ViewState> = {},
+  ) {
+    const reorder = this.keyboardReorder;
+    if (reorder) {
+      const order = this.keyboardOrderIn(s, reorder.location);
+      if (
+        !order ||
+        (!sameOrder(order, reorder.before) &&
+          !(
+            reorder.attempt?.request && sameOrder(order, reorder.attempt.after)
+          ))
+      )
+        presentation = this.clearKeyboardReorder(changedKeyboardOrder);
+    }
     const current = this.state.location;
     if (
       current.itemId === null ||
@@ -175,7 +233,7 @@ export class WorkspaceController {
         current.itemId === null
           ? current
           : { ...current, scope: effectiveScope(s.items, current.itemId) };
-      this.patch({ snapshot: s, location });
+      this.patch({ snapshot: s, location, ...presentation });
       return;
     }
     const prior = new Map(this.state.snapshot.items.map((x) => [x.id, x]));
@@ -194,7 +252,7 @@ export class WorkspaceController {
       parent = prior.get(parent)?.parentId ?? candidate?.parentId ?? null;
     }
     const location = { scope: current.scope, itemId: parent };
-    this.patch({ snapshot: s, location, ownerId: parent });
+    this.patch({ snapshot: s, location, ownerId: parent, ...presentation });
     if (this.state.activeKey === composeKey(current))
       this.context(composeKey(location));
   }
@@ -210,6 +268,7 @@ export class WorkspaceController {
       try {
         const s = await this.repo.loadWorkspace();
         if (this.disposed) return false;
+        this.snapshotEpoch = this.repo.viewEpoch;
         this.snapshot(s);
         this.resetBuffers(s);
         this.patch({
@@ -315,12 +374,18 @@ export class WorkspaceController {
           for (const [key, intent] of this.captureIntents)
             if (gone(key) || removed.includes(intent.id))
               this.captureIntents.delete(key);
+        this.snapshotEpoch = this.repo.viewEpoch;
         this.patch({
           buffers,
           purgedItemIds: removed,
           operation: 'navigation-reconcile',
           ...(refresh?.replaced
             ? {
+                ...this.clearKeyboardReorder(
+                  this.keyboardReorder
+                    ? replacedKeyboardLibrary
+                    : this.state.keyboardReorderError,
+                ),
                 cacheGeneration: this.state.cacheGeneration + 1,
                 location: { scope: 'live', itemId: null },
                 ownerId: null,
@@ -396,11 +461,12 @@ export class WorkspaceController {
     });
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
-      void this.flush();
+      void this.run(() => this.checkpointBuffers());
     }, 300);
   }
   // Called only inside the repository queue. Captures checkpoint; existing notes commit.
-  private async checkpoint() {
+  private async checkpointBuffers(ownsView?: () => boolean) {
+    if (ownsView?.() === false) return false;
     if (this.pendingRemoteOrigin) {
       this.error(
         new Error(
@@ -415,7 +481,9 @@ export class WorkspaceController {
       const { source, revision } = this.state.buffers[key];
       try {
         if (composeOwner(key)) {
-          this.snapshot(await this.repo.checkpointDraft(key, source, revision));
+          const saved = await this.repo.checkpointDraft(key, source, revision);
+          if (ownsView?.() === false) return false;
+          this.snapshot(saved);
         } else {
           const note = this.state.snapshot.items.find((n) => n.id === key);
           if (!note)
@@ -423,9 +491,12 @@ export class WorkspaceController {
               'This note is unavailable. Your source is retained.',
             );
           this.patch({ status: 'Saving…' });
-          this.snapshot(
-            await this.repo.saveItemSource(key, source, { key, revision }),
-          );
+          const saved = await this.repo.saveItemSource(key, source, {
+            key,
+            revision,
+          });
+          if (ownsView?.() === false) return false;
+          this.snapshot(saved);
         }
         if (this.state.buffers[key]?.revision === revision) {
           this.dirty.delete(key);
@@ -434,31 +505,284 @@ export class WorkspaceController {
             error: '',
           });
         }
+        if (ownsView?.() === false) return false;
       } catch (e) {
+        if (ownsView?.() === false) return false;
+        if (ownsView && isReplacedLibrary(e)) throw e;
         // Preserve a recoverable draft when committing the note failed. A checkpoint
         // failure must not replace the original useful save error or clear dirty state.
         if (!composeOwner(key)) {
           const latest = this.state.buffers[key];
           try {
-            this.snapshot(
-              await this.repo.checkpointDraft(
-                key,
-                latest.source,
-                latest.revision,
-              ),
+            const saved = await this.repo.checkpointDraft(
+              key,
+              latest.source,
+              latest.revision,
             );
-          } catch {
+            if (ownsView?.() === false) return false;
+            this.snapshot(saved);
+          } catch (checkpointError) {
+            if (ownsView && isReplacedLibrary(checkpointError))
+              throw checkpointError;
             /* Visible source remains in the buffer for retry. */
           }
         }
-        this.error(e);
+        if (ownsView?.() !== false) this.error(e);
         return false;
       }
     }
     return !this.disposed;
   }
+
+  private async checkpoint(retryReorder = false) {
+    do {
+      if (!this.keyboardReorder && this.state.keyboardReorderError) {
+        // The order conflict blocks the transition, but newer text still needs a checkpoint.
+        await this.checkpointBuffers();
+        return false;
+      }
+      if (!(await this.drainKeyboardReorder(false, retryReorder))) return false;
+      if (!(await this.checkpointBuffers())) return false;
+    } while (this.dirty.size || this.keyboardReorder);
+    return !this.state.keyboardReorderError;
+  }
+
   flush() {
-    return this.run(() => this.checkpoint());
+    return this.run(() => this.checkpoint(true));
+  }
+
+  stageKeyboardReorder(ids: readonly string[], direction: -1 | 1) {
+    if (
+      this.disposed ||
+      !this.state.loaded ||
+      this.state.query.trim() ||
+      this.state.preview ||
+      this.saving ||
+      this.state.operation ||
+      this.pendingRemoteOrigin ||
+      this.snapshotEpoch !== this.repo.viewEpoch
+    )
+      return null;
+
+    const { location, snapshot } = this.state;
+    const pending = this.keyboardReorder;
+    if (
+      pending &&
+      (this.state.keyboardReorderError ||
+        !sameLocation(pending.location, location))
+    )
+      return null;
+    const before =
+      pending?.desired ??
+      directEntries(snapshot, location).map((item) => item.id);
+    const selected = new Set(ids);
+    const group = before.filter((id) => selected.has(id));
+    if (
+      !group.length ||
+      group.length !== ids.length ||
+      (pending && !sameOrder(group, pending.ids))
+    )
+      return null;
+    const after = reorderSelected(before, group, direction);
+    if (sameOrder(before, after)) return null;
+
+    const batch = pending ?? {
+      location: { ...location },
+      epoch: this.snapshotEpoch,
+      generation: this.state.cacheGeneration,
+      ids: group,
+      before,
+      desired: before,
+      quiet: null,
+      attempt: null,
+    };
+    batch.desired = after;
+    const savingOrder = batch.attempt?.after ?? batch.before;
+    if (sameOrder(after, savingOrder)) {
+      batch.quiet = null;
+      if (!batch.attempt) {
+        this.patch(this.clearKeyboardReorder());
+        return after;
+      }
+    } else {
+      const now = performance.now();
+      const first = batch.quiet?.first ?? now;
+      batch.quiet = { first, due: Math.min(now + 400, first + 1_000) };
+    }
+    this.keyboardReorder = batch;
+    this.patch({
+      keyboardOrder: after,
+      keyboardReorderIds: batch.ids,
+      keyboardReorderLocation: batch.location,
+      keyboardReorderError: '',
+    });
+    this.scheduleKeyboardReorder();
+    return after;
+  }
+
+  dismissKeyboardReorderConflict() {
+    if (!this.keyboardReorder) this.patch({ keyboardReorderError: '' });
+  }
+
+  private ownsKeyboardReorder(batch: KeyboardReorder) {
+    if (this.disposed || this.keyboardReorder !== batch) return false;
+    if (
+      batch.epoch === this.repo.viewEpoch &&
+      batch.generation === this.state.cacheGeneration
+    )
+      return true;
+    this.patch(this.clearKeyboardReorder(replacedKeyboardLibrary));
+    return false;
+  }
+
+  private keyboardOrderIn(snapshot: WorkspaceSnapshot, location: Location) {
+    if (
+      location.itemId !== null &&
+      (!snapshot.items.some(
+        (item) => item.id === location.itemId && item.kind === 'tree',
+      ) ||
+        effectiveScope(snapshot.items, location.itemId) !== location.scope)
+    )
+      return null;
+    return directEntries(snapshot, location).map((item) => item.id);
+  }
+
+  private clearKeyboardReorder(error = '') {
+    clearTimeout(this.keyboardReorderTimer);
+    this.keyboardReorder = null;
+    return {
+      keyboardOrder: null,
+      keyboardReorderIds: null,
+      keyboardReorderLocation: null,
+      keyboardReorderError: error,
+    };
+  }
+
+  private scheduleKeyboardReorder() {
+    clearTimeout(this.keyboardReorderTimer);
+    const batch = this.keyboardReorder;
+    if (!batch?.quiet || batch.attempt || this.disposed) return;
+    this.keyboardReorderTimer = setTimeout(
+      () => void this.run(() => this.drainKeyboardReorder(true)),
+      Math.max(0, batch.quiet.due - performance.now()),
+    );
+  }
+
+  private async drainKeyboardReorder(dueOnly: boolean, retry = false) {
+    while (!this.disposed && this.keyboardReorder) {
+      const batch = this.keyboardReorder;
+      if (this.state.keyboardReorderError && !retry) return false;
+      if (dueOnly && (!batch.quiet || batch.quiet.due > performance.now())) {
+        this.scheduleKeyboardReorder();
+        return true;
+      }
+      clearTimeout(this.keyboardReorderTimer);
+      const attempt = (batch.attempt ??= {
+        after: batch.desired,
+        request: null,
+      });
+      batch.quiet = null;
+      if (!(await this.persistKeyboardReorder(batch, attempt))) return false;
+    }
+    return !this.disposed;
+  }
+
+  private keyboardBindingReplaced() {
+    this.patch(this.clearKeyboardReorder(replacedKeyboardLibrary));
+    void this.refreshFromRepository();
+  }
+
+  private async readKeyboardWorkspace(batch: KeyboardReorder) {
+    try {
+      return await (batch.epoch && this.repo.readBoundWorkspace
+        ? this.repo.readBoundWorkspace(batch.epoch)
+        : this.repo.loadWorkspace());
+    } catch (error) {
+      if (this.ownsKeyboardReorder(batch) && isReplacedLibrary(error))
+        this.keyboardBindingReplaced();
+      throw error;
+    }
+  }
+
+  private async persistKeyboardReorder(
+    batch: KeyboardReorder,
+    attempt: NonNullable<KeyboardReorder['attempt']>,
+  ) {
+    const ownsView = () => this.ownsKeyboardReorder(batch);
+    try {
+      if (
+        !(await this.checkpointBuffers(ownsView)) ||
+        !ownsView() ||
+        !(await this.reconcileCreations(undefined, ownsView, () =>
+          this.readKeyboardWorkspace(batch),
+        ))
+      )
+        throw new Error(this.state.error);
+      if (!ownsView()) return false;
+      if (!attempt.request) {
+        const order = this.keyboardOrderIn(this.state.snapshot, batch.location);
+        if (!order || !sameOrder(order, batch.before)) {
+          this.patch(this.clearKeyboardReorder(changedKeyboardOrder));
+          return false;
+        }
+        attempt.request = this.captureReorder(
+          [...batch.ids],
+          [...attempt.after],
+        );
+      }
+      const result = await this.repo.moveItems(attempt.request);
+      if (!ownsView()) return false;
+      const order = this.keyboardOrderIn(result, batch.location);
+      if (!order || !sameOrder(order, attempt.after)) {
+        this.snapshot(result, this.clearKeyboardReorder(changedKeyboardOrder));
+        return false;
+      }
+      batch.before = attempt.after;
+      batch.attempt = null;
+      if (sameOrder(batch.desired, batch.before)) {
+        this.snapshot(result, {
+          ...this.clearKeyboardReorder(),
+          status: 'Order updated',
+        });
+      } else {
+        this.snapshot(result, { keyboardReorderError: '' });
+      }
+      return true;
+    } catch (error) {
+      if (!ownsView()) return false;
+      if (isReplacedLibrary(error)) {
+        this.keyboardBindingReplaced();
+        return false;
+      }
+      if (attempt.request) {
+        let current: WorkspaceSnapshot | undefined;
+        try {
+          current = await this.readKeyboardWorkspace(batch);
+        } catch {
+          // Unavailable reconciliation keeps the exact attempted write retryable.
+        }
+        if (!ownsView()) return false;
+        if (current) {
+          try {
+            validateMove(structuredClone(current), attempt.request);
+          } catch {
+            this.snapshot(
+              current,
+              this.clearKeyboardReorder(changedKeyboardOrder),
+            );
+            void this.refreshFromRepository();
+            return false;
+          }
+        }
+      }
+      const detail = errorMessage(error);
+      this.patch({
+        keyboardReorderError: detail
+          ? `Order needs retry. ${detail}`
+          : 'Order needs retry.',
+      });
+      return false;
+    }
   }
   private navigate(
     key: string,
@@ -493,15 +817,15 @@ export class WorkspaceController {
           return false;
         }
         const leaving = from.scope !== to.scope || from.itemId !== to.itemId;
+        if (intent !== this.viewIntent) return false;
+        // After checkpointing, own the structural transition before reconciliation can yield.
+        this.patch({ operation: promoteDestination ? 'promote' : 'navigate' });
         if (leaving && !(await this.reconcileCreations())) {
           this.retryIntent = retry;
           this.patch({ mutationRetry: true });
           return false;
         }
         if (intent !== this.viewIntent) return false;
-        // A checkpoint can accept newer typing until it has saved every revision.
-        // Only the structural transition locks editing and publishes a visit cause.
-        this.patch({ operation: promoteDestination ? 'promote' : 'navigate' });
         const snapshot =
           leaving || promoteDestination
             ? await this.repo.transitionLocation(request)
@@ -1315,14 +1639,20 @@ export class WorkspaceController {
       'Notes moved',
     );
   }
-  private async reconcileCreations(skipChild?: string): Promise<boolean> {
+  private async reconcileCreations(
+    skipChild?: string,
+    ownsView?: () => boolean,
+    loadWorkspace = () => this.repo.loadWorkspace(),
+  ): Promise<boolean> {
+    if (ownsView?.() === false) return false;
     if (
       !this.captureIntents.size &&
       ![...this.childIntents.keys()].some((id) => id !== skipChild)
     )
       return true;
     try {
-      let current = await this.repo.loadWorkspace();
+      let current = await loadWorkspace();
+      if (ownsView?.() === false) return false;
       for (const [key, request] of this.captureIntents) {
         const existing = current.items.find(
           (x) => x.id.toLowerCase() === request.id.toLowerCase(),
@@ -1341,6 +1671,7 @@ export class WorkspaceController {
                   }
                 : request;
             current = await this.repo.captureItem(replay);
+            if (ownsView?.() === false) return false;
             this.reconciledCaptures.add(request.id);
           }
         } else {
@@ -1350,15 +1681,19 @@ export class WorkspaceController {
       }
       for (const [id, request] of this.childIntents) {
         if (id === skipChild) continue;
-        if (current.items.some((x) => x.id.toLowerCase() === id.toLowerCase()))
+        if (
+          current.items.some((x) => x.id.toLowerCase() === id.toLowerCase())
+        ) {
           current = await this.repo.createChildTree(request);
+          if (ownsView?.() === false) return false;
+        }
         this.childIntents.delete(id);
         if (this.creationIntent?.id === id) this.creationIntent = null;
       }
       this.snapshot(current);
       return true;
     } catch (e) {
-      this.error(e);
+      if (ownsView?.() !== false) this.error(e);
       return false;
     }
   }
@@ -1503,6 +1838,7 @@ export class WorkspaceController {
       try {
         const s = await this.repo.confirmRestore(p.token, confirm);
         if (s) {
+          this.snapshotEpoch = this.repo.viewEpoch;
           clearTimeout(this.timer);
           this.snapshot(s);
           this.resetBuffers(s);
@@ -1540,6 +1876,7 @@ export class WorkspaceController {
   }
   dispose() {
     clearTimeout(this.timer);
+    this.clearKeyboardReorder();
     this.disposed = true;
     this.listeners.clear();
   }
