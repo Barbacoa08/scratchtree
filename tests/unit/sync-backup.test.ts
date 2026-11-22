@@ -10,6 +10,7 @@ import {
 import {
   encodeCloudBackup,
   validateCloudBackup,
+  validateIndexedBackup,
   type BackupV8,
   type RecoveryRecord,
 } from '../../src/lib/sync/backup';
@@ -345,6 +346,21 @@ describe('strict current-only portable cloud backup', () => {
     );
     expect(Buffer.byteLength(encoded)).toBe(MAX_ENVELOPE);
     expect(JSON.parse(encoded)).toEqual(b);
+    const baseline = { library: b.library, device: b.device };
+    expect(validateIndexedBackup(baseline, MAX_ENVELOPE, baseline, [])).toBe(
+      MAX_ENVELOPE,
+    );
+    const before = b.library.items[0];
+    const after = { ...before, position: 10 };
+    const larger = {
+      ...baseline,
+      library: { ...b.library, items: [after, ...b.library.items.slice(1)] },
+    };
+    expect(() =>
+      validateIndexedBackup(baseline, MAX_ENVELOPE, larger, [
+        { before, after },
+      ]),
+    ).toThrow('10 MiB');
     recovery.markdown += 'x';
     rejected(b);
     expect(() =>
@@ -356,6 +372,59 @@ describe('strict current-only portable cloud backup', () => {
     expect(Buffer.byteLength(compact)).toBe(MAX_ENVELOPE + 1);
     expect(Buffer.byteLength(raw)).toBeLessThan(MAX_ENVELOPE);
     expect(validateCloudBackup(raw)).toHaveProperty('code', 'invalid_backup');
+  });
+  it('measures changed items, separators, and local data exactly through capture and delete', () => {
+    const note = item({
+      id: live,
+      markdown: '雪😀 "escape" \\ \ud800\r\n',
+      position: 0,
+    });
+    const another = item({ id: nested, position: 1, markdown: 'another' });
+    const removed = { ...note, deletedAt: 1234, restoreIndex: 0 };
+    const empty = {
+      library: { items: [], purgedIds: [gone] },
+      device: {
+        drafts: snapshot().drafts.slice(1, 2),
+        undoDeleteIds: [],
+        recovery: [],
+      },
+    };
+    const captured = {
+      ...empty,
+      library: { ...empty.library, items: [note] },
+      device: { ...empty.device, drafts: [], recovery: [record()] },
+    };
+    const withSibling = {
+      ...captured,
+      library: { ...captured.library, items: [note, another] },
+    };
+    const deleted = {
+      ...withSibling,
+      library: {
+        ...withSibling.library,
+        items: [removed, { ...another, position: 0 }],
+      },
+      device: { ...withSibling.device, undoDeleteIds: [live] },
+    };
+    for (const [before, after, changes] of [
+      [empty, captured, [{ after: note }]],
+      [captured, withSibling, [{ after: another }]],
+      [
+        withSibling,
+        deleted,
+        [
+          { before: note, after: removed },
+          { before: another, after: deleted.library.items[1] },
+        ],
+      ],
+    ] as const) {
+      const previousBytes = Buffer.byteLength(
+        encodeCloudBackup(before, exportedAt),
+      );
+      expect(validateIndexedBackup(before, previousBytes, after, changes)).toBe(
+        Buffer.byteLength(encodeCloudBackup(after, exportedAt)),
+      );
+    }
   });
   it.each([true, false])(
     'owns the export timestamp when a full validated backup is supplied (explicit: %s)',

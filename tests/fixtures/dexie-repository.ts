@@ -1091,6 +1091,146 @@ export async function run(scenario: string) {
           item.realmId === 'private',
         'source retry updates only its own properties',
       );
+    } else if (scenario === 'indexed-capture-delete') {
+      const source = '雪😀\r\n"escaped"\\\ud800';
+      await capture(1, 'Parent');
+      await capture(2, 'Unrelated');
+      await capture(3, 'Previous trash');
+      await repo.deleteItem(id(3));
+      const at = { scope: 'live' as const, itemId: id(1) };
+      const epoch = await repo.getEpoch();
+      const originalRoot = await db.orders.get([epoch, 'root:live']);
+      const stringify = JSON.stringify;
+      let envelopes = 0;
+      JSON.stringify = new Proxy(stringify, {
+        apply(target, receiver, args) {
+          if (
+            args[0]?.format === 'scratchtree' &&
+            args[0]?.library?.items.length
+          )
+            envelopes++;
+          return Reflect.apply(target, receiver, args);
+        },
+      });
+      let captured, deleted;
+      try {
+        captured = await capture(4, source, at);
+        deleted = await repo.deleteItem(id(4));
+      } finally {
+        JSON.stringify = stringify;
+      }
+      assert(
+        envelopes === 4,
+        `one complete baseline per phase, got ${envelopes}`,
+      );
+      assert(
+        captured.items.find((row) => row.id === id(1))?.kind === 'tree',
+        'capture promotes parent',
+      );
+      assert(
+        deleted.undoDeleteIds[0] === id(4),
+        'acknowledged delete owns Undo',
+      );
+      assert(
+        JSON.stringify(await db.orders.get([epoch, 'root:live'])) ===
+          JSON.stringify(originalRoot) &&
+          !(await db.orders.get([epoch, id(1)])) &&
+          (await db.orders.get([epoch, 'root:trash']))?.ids.join() ===
+            [id(3), id(4)].join(),
+        'only changed order groups reflect the delete',
+      );
+      const receipts = (await db.pending.toArray()).filter((intent) =>
+        intent.expected.items.some((row) => row.id === id(4)),
+      );
+      assert(
+        receipts.length === 2 &&
+          receipts.every((intent) => intent.localApplied),
+        'both commands retain their durable journal outcome',
+      );
+      await repo.undoDelete(captureUndoDelete(deleted));
+      repo.close();
+      db = new ScratchtreeDatabase({ name });
+      repo = new DexieRepository(db, files);
+      const restored = (await repo.loadWorkspace()).items.find(
+        (row) => row.id === id(4),
+      );
+      assert(
+        restored?.markdown === source &&
+          restored.parentId === id(1) &&
+          restored.deletedAt === null,
+        'reopen preserves exact restored source and location',
+      );
+    } else if (scenario === 'indexed-capture-revalidation') {
+      await capture(1, 'Existing');
+      const epoch = await repo.getEpoch();
+      // Leave room for the source retained by the barrier, but not a second
+      // copy of that source in the saved note.
+      const recoveries = Array.from({ length: 5 }, () => ({
+        kind: 'source' as const,
+        id: crypto.randomUUID(),
+        itemId: id(1),
+        markdown: '\\'.repeat(MAX_SOURCE - 1536),
+        originEpoch: epoch,
+        recordedAt: 0,
+        reason: 'unknown' as const,
+      }));
+      const growth = recoveries.pop()!;
+      await db.recovery.bulkAdd(recoveries);
+      const insertDuringBarrier = (
+        _key: unknown,
+        _row: unknown,
+        transaction: import('dexie').Transaction,
+      ) => {
+        void transaction.table('deviceRecovery').put(growth);
+      };
+      const source = 'retained'.repeat(1024);
+      db.pending.hook('creating', insertDuringBarrier);
+      let error: unknown;
+      try {
+        await capture(2, source);
+      } catch (failure) {
+        error = failure;
+      } finally {
+        db.pending.hook('creating').unsubscribe(insertDuringBarrier);
+      }
+      assert(
+        error instanceof Error &&
+          error.message === 'Backup exceeds the 10 MiB capacity.',
+        `fresh capture exceeds capacity, got ${String(error)}`,
+      );
+      assert(
+        (await repo.loadWorkspace()).items.length === 1,
+        'fresh baseline itself is valid',
+      );
+      const pending = (await db.pending.toArray()).find(
+        (intent) =>
+          intent.command.kind === 'captureItem' &&
+          intent.command.request.id === id(2),
+      );
+      assert(
+        pending &&
+          pending.command.kind === 'captureItem' &&
+          pending.command.request.markdown === source &&
+          !pending.localApplied,
+        'the exact unsaved command survives a failed fresh check',
+      );
+      assert(
+        !(await db.notes.get([epoch, id(2)])) &&
+          !(await db.witnesses.get(pending.id)) &&
+          (await db.recovery.get(growth.id)),
+        'capacity rejection leaves the new recovery, with no note or witness',
+      );
+      await db.recovery.delete(growth.id);
+      const retried = await capture(2, source);
+      assert(
+        retried.items.find((row) => row.id === id(2))?.markdown === source,
+        'retry preserves the source and identity',
+      );
+      assert(
+        (await db.pending.get(pending.id))?.localApplied &&
+          (await db.witnesses.get(pending.id)),
+        'retry settles the original journal entry and witness',
+      );
     } else if (scenario === 'aggregate-capacity') {
       const epoch = await repo.getEpoch();
       const items = Array.from({ length: 20000 }, (_, n) => ({

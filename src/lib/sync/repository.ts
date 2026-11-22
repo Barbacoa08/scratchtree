@@ -12,7 +12,11 @@ import {
   RAW_BUFFER_PREFIX,
   type RawBuffer,
 } from './recovery';
-import { toSharedItem as share, orderRows as orders } from './representation';
+import {
+  toSharedItem as share,
+  orderRows as orders,
+  orderGroupId,
+} from './representation';
 import { liveQuery } from 'dexie';
 import type {
   ColorToken,
@@ -23,7 +27,7 @@ import type {
 } from '../domain/notes';
 import { emptyWorkspace, MAX_ENVELOPE } from '../domain/notes';
 import * as rules from '../domain/items';
-import { composeOwner } from '../domain/hierarchy';
+import { composeOwner, effectiveScope } from '../domain/hierarchy';
 import type { BackupFiles } from '../platform/backup-files';
 import type {
   CaptureItem,
@@ -45,7 +49,9 @@ import { projectLibrary } from './canonical';
 import {
   encodeCloudBackup,
   LibraryCapacityError,
+  serializeCloudBackup,
   validateCloudBackup,
+  validateIndexedBackup,
   type BackupV8,
   type RecoveryRecord,
 } from './backup';
@@ -89,6 +95,93 @@ interface State {
   recovery: RecoveryRecord[];
   undo?: UndoRow;
 }
+type CheckedState = State & { backupBytes: number };
+
+interface ItemChange {
+  id: string;
+  before?: Item;
+  after?: Item;
+}
+
+interface IndexedChanges {
+  items: ItemChange[];
+  orderGroups: Set<string>;
+}
+
+function itemChanges(before: WorkspaceSnapshot, after: WorkspaceSnapshot) {
+  const old = new Map(before.items.map((item) => [item.id, item]));
+  const next = new Map(after.items.map((item) => [item.id, item]));
+  const changes: ItemChange[] = [];
+  // Keep journal ordering based on prior items followed by new IDs.
+  for (const id of new Set([...old.keys(), ...next.keys()])) {
+    const prior = old.get(id),
+      value = next.get(id);
+    if (!prior || !value || !sameItem(prior, value))
+      changes.push({ id, before: prior, after: value });
+  }
+  return changes;
+}
+
+function indexedChanges(
+  before: WorkspaceSnapshot,
+  after: WorkspaceSnapshot,
+): IndexedChanges {
+  const items = itemChanges(before, after);
+  const orderGroups = new Set<string>();
+  for (const change of items) {
+    const old = change.before && orderGroupId(change.before);
+    const next = change.after && orderGroupId(change.after);
+    if (old === next && change.before?.position === change.after?.position)
+      continue;
+    if (old !== undefined) orderGroups.add(old);
+    if (next !== undefined) orderGroups.add(next);
+  }
+  return { items, orderGroups };
+}
+
+function canIndex(command: IntentCommand, snapshot: WorkspaceSnapshot) {
+  if (command.kind === 'captureItem')
+    return !snapshot.items.some((item) => item.id === command.request.id);
+  if (command.kind !== 'deleteItem' || command.leave) return false;
+  const target = snapshot.items.find((item) => item.id === command.id);
+  return (
+    !!target &&
+    target.deletedAt === null &&
+    (target.parentId === null ||
+      effectiveScope(snapshot.items, target.id) === 'live')
+  );
+}
+
+function copyMutation(state: State, indexed: boolean): State {
+  if (!indexed) return structuredClone(state);
+  // These commands change scalar item fields and replace the draft or Undo
+  // list. Copy the records without cloning the unchanged Markdown strings.
+  return {
+    ...state,
+    snapshot: {
+      ...state.snapshot,
+      items: state.snapshot.items.map(
+        (item) =>
+          ({ ...item }) satisfies Record<
+            keyof Item,
+            string | number | boolean | null
+          >,
+      ),
+    },
+    recovery: structuredClone(state.recovery),
+  };
+}
+
+function undoFacts(snapshot: WorkspaceSnapshot) {
+  const ids = new Set(snapshot.undoDeleteIds);
+  return ids.size === 0
+    ? []
+    : rules.structuralItems({
+        ...snapshot,
+        items: snapshot.items.filter((item) => ids.has(item.id)),
+      });
+}
+
 const unavailable = () =>
   Object.assign(
     new Error(
@@ -252,7 +345,7 @@ export class DexieRepository implements Repository {
     capturedEpoch?: string,
     allowRawBuffers = false,
     projection?: ReturnType<typeof projectLibrary>,
-  ): Promise<State> {
+  ): Promise<CheckedState> {
     if (
       !allowRawBuffers &&
       (await this.db.device.where('key').startsWith(RAW_BUFFER_PREFIX).count())
@@ -312,7 +405,7 @@ export class DexieRepository implements Repository {
       return false;
     });
     const facts = new Map(undo?.facts.map((x) => [x.id, x]) ?? []),
-      actual = new Map(rules.structuralItems(snapshot).map((x) => [x.id, x]));
+      actual = new Map(undoFacts(snapshot).map((x) => [x.id, x]));
     snapshot.undoDeleteIds = snapshot.undoDeleteIds.filter((id) => {
       const item = actual.get(id),
         old = facts.get(id);
@@ -331,18 +424,37 @@ export class DexieRepository implements Repository {
       recovery,
       undo,
     };
-    this.encode(state);
-    return state;
+    const { byteLength: backupBytes } = serializeCloudBackup(
+      this.backupOf(state),
+    );
+    return { ...state, backupBytes };
   }
-  private encode(state: State) {
-    return encodeCloudBackup({
+  private backupOf(state: State) {
+    return {
       library: { items: state.snapshot.items, purgedIds: state.purgedIds },
       device: {
         drafts: state.snapshot.drafts,
         undoDeleteIds: state.snapshot.undoDeleteIds,
         recovery: state.recovery,
       },
-    });
+    };
+  }
+  private encode(state: State) {
+    return encodeCloudBackup(this.backupOf(state));
+  }
+  private checkMutation(
+    before: CheckedState,
+    after: State,
+    indexed?: IndexedChanges,
+  ) {
+    if (indexed)
+      validateIndexedBackup(
+        this.backupOf(before),
+        before.backupBytes,
+        this.backupOf(after),
+        indexed.items,
+      );
+    else this.encode(after);
   }
   private async local(state: State, markView = true) {
     const existing = await this.db.drafts
@@ -359,9 +471,7 @@ export class DexieRepository implements Repository {
       if (!old || !equal({ ...d, epoch: state.epoch }, old))
         await this.db.drafts.put({ ...d, epoch: state.epoch });
     }
-    const facts = rules
-      .structuralItems(state.snapshot)
-      .filter((x) => state.snapshot.undoDeleteIds.includes(x.id));
+    const facts = undoFacts(state.snapshot);
     const undo = {
       epoch: state.epoch,
       ids: state.snapshot.undoDeleteIds,
@@ -1010,14 +1120,11 @@ export class DexieRepository implements Repository {
     before: WorkspaceSnapshot,
     after: WorkspaceSnapshot,
     purgedIds: string[],
+    indexed?: IndexedChanges,
   ): Promise<ExpectedOutcome> {
-    const old = new Map(before.items.map((x) => [x.id, x])),
-      next = new Map(after.items.map((x) => [x.id, x]));
     const items: ExpectedOutcome['items'] = [];
-    for (const id of new Set([...old.keys(), ...next.keys()])) {
-      const previous = old.get(id),
-        value = next.get(id);
-      if (previous && value && sameItem(previous, value)) continue;
+    for (const { id, before: previous, after: value } of indexed?.items ??
+      itemChanges(before, after)) {
       const structural = (item: Item) =>
         rules.structuralItems({
           items: [item],
@@ -1076,8 +1183,12 @@ export class DexieRepository implements Repository {
         });
       }
     }
-    const priorOrders = new Map(orders(before, '').map((x) => [x.id, x]));
-    const nextOrders = new Map(orders(after, '').map((x) => [x.id, x]));
+    const priorOrders = new Map(
+      orders(before, '', indexed?.orderGroups).map((x) => [x.id, x]),
+    );
+    const nextOrders = new Map(
+      orders(after, '', indexed?.orderGroups).map((x) => [x.id, x]),
+    );
     const expectedOrders = [
       ...new Set([...priorOrders.keys(), ...nextOrders.keys()]),
     ]
@@ -1130,16 +1241,23 @@ export class DexieRepository implements Repository {
     after: State,
     capturedAt = Date.now(),
     purgeTimes?: Map<string, number>,
+    indexed?: IndexedChanges,
   ) {
-    const previous = new Map(before.snapshot.items.map((x) => [x.id, x]));
-    for (const item of after.snapshot.items) {
+    const oldItems = indexed
+      ? indexed.items.flatMap(({ before: item }) => (item ? [item] : []))
+      : before.snapshot.items;
+    const newItems = indexed
+      ? indexed.items.flatMap(({ after: item }) => (item ? [item] : []))
+      : after.snapshot.items;
+    const previous = new Map(oldItems.map((x) => [x.id, x]));
+    for (const item of newItems) {
       const old = previous.get(item.id),
         key: [string, string] = [after.epoch, item.id];
       if (!old) {
         await this.db.notes.add(share(item, after.epoch));
         continue;
       }
-      if (sameItem(old, item)) continue;
+      if (!indexed && sameItem(old, item)) continue;
       const from = share(old, after.epoch),
         to = share(item, after.epoch);
       const changes: Record<string, unknown> = {};
@@ -1166,10 +1284,16 @@ export class DexieRepository implements Repository {
         });
       }
     const oldOrders = new Map(
-        orders(before.snapshot, before.epoch).map((x) => [x.id, x]),
+        orders(before.snapshot, before.epoch, indexed?.orderGroups).map((x) => [
+          x.id,
+          x,
+        ]),
       ),
       newOrders = new Map(
-        orders(after.snapshot, after.epoch).map((x) => [x.id, x]),
+        orders(after.snapshot, after.epoch, indexed?.orderGroups).map((x) => [
+          x.id,
+          x,
+        ]),
       );
     for (const id of new Set([...oldOrders.keys(), ...newOrders.keys()])) {
       const row = newOrders.get(id);
@@ -1212,7 +1336,8 @@ export class DexieRepository implements Repository {
         await this.db.pending.where('fingerprint').equals(fingerprint).toArray()
       ).sort((a, b) => b.recordedAt - a.recordedAt);
       let pending = candidates.find((x) => !x.localApplied);
-      const after = structuredClone(before),
+      const useIndex = !candidates.length && canIndex(command, before.snapshot);
+      const after = copyMutation(before, useIndex),
         removedIds = this.apply(after.snapshot, command);
       if (
         (command.kind === 'captureItem' &&
@@ -1240,12 +1365,16 @@ export class DexieRepository implements Repository {
               ? { itemId: command.request.id, markdown: 'Untitled' }
               : null;
       if (source) this.retainSource(after, source, capturedAt);
-      this.encode(after);
+      const indexed = useIndex
+        ? indexedChanges(before.snapshot, after.snapshot)
+        : undefined;
+      this.checkMutation(before, after, indexed);
       if (!pending) {
         const expected = await this.expected(
           before.snapshot,
           after.snapshot,
           removedIds,
+          indexed,
         );
         pending = {
           id: crypto.randomUUID(),
@@ -1288,7 +1417,8 @@ export class DexieRepository implements Repository {
           throw replaced();
         const fresh = await this.read();
         if (fresh.epoch !== intent.epoch) throw replaced();
-        const next = structuredClone(fresh);
+        const indexFresh = useIndex && canIndex(intent.command, fresh.snapshot);
+        const next = copyMutation(fresh, indexFresh);
         const acknowledgedReplay =
           intent.localApplied &&
           this.outcomeMatches(fresh, intent.expected, intent.command);
@@ -1344,8 +1474,11 @@ export class DexieRepository implements Repository {
           }
         }
         next.purgedIds = [...new Set([...fresh.purgedIds, ...removed])];
-        this.encode(next);
-        await this.persist(fresh, next, intent.recordedAt);
+        const changes = indexFresh
+          ? indexedChanges(fresh.snapshot, next.snapshot)
+          : undefined;
+        this.checkMutation(fresh, next, changes);
+        await this.persist(fresh, next, intent.recordedAt, undefined, changes);
         await this.db.witnesses.put({
           id: intent.id,
           epoch: intent.epoch,
