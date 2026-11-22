@@ -12,12 +12,11 @@ const archPrefix = `${releaseBase}/download/${tag}/scratchtree-preview-${release
 if (
   release.downloadUrl !==
     `${releaseBase}/download/${tag}/Scratchtree_${release.version}_aarch64.dmg` ||
-  (release.archDownloadUrl !== undefined &&
-    (typeof release.archDownloadUrl !== 'string' ||
-      !release.archDownloadUrl.startsWith(archPrefix) ||
-      !/^[1-9]\d*-x86_64\.pkg\.tar\.zst$/.test(
-        release.archDownloadUrl.slice(archPrefix.length),
-      ))) ||
+  typeof release.archDownloadUrl !== 'string' ||
+  !release.archDownloadUrl.startsWith(archPrefix) ||
+  !/^[1-9]\d*-x86_64\.pkg\.tar\.zst$/.test(
+    release.archDownloadUrl.slice(archPrefix.length),
+  ) ||
   release.releaseUrl !== `${releaseBase}/tag/${tag}` ||
   !/^macOS [\d.]+ on Apple Silicon Macs$/.test(release.testedOn)
 )
@@ -25,12 +24,6 @@ if (
     'Review both release assets and the observed Mac environment before building the landing page.',
   );
 let html = await readFile(new URL('index.html', here), 'utf8');
-if (release.archDownloadUrl === undefined) {
-  html = html.replace(
-    /^ *<!-- arch-preview:start -->[\s\S]*?<!-- arch-preview:end -->\n/m,
-    '',
-  );
-}
 for (const [key, value] of Object.entries(release))
   html = html.replaceAll(`{{${key}}}`, String(value));
 if (html.includes('{{')) throw new Error('Unresolved landing-page content.');

@@ -58,7 +58,7 @@ The right panel uses **Status**, covering local saves and cloud synchronization 
 
 ## Arch Linux distribution
 
-Scratchtree 0.2.7 publishes the first experimental Arch Linux x86_64 pacman package alongside the Apple Silicon DMG in one GitHub prerelease. Its accepted scope is signed-out local use, with the native X11 smoke and download procedure documented in the [Arch Preview guide](docs/ARCH-PREVIEW.md). AUR, AppImage, and broader desktop acceptance remain open.
+Scratchtree 0.2.7 was the first GitHub prerelease with an experimental Arch Linux x86_64 pacman package. Each release includes that platform alongside the Apple Silicon DMG, and the landing page links to both installers. Its accepted scope is signed-out local use, with the native X11 smoke and download procedure documented in the [Arch Preview guide](docs/ARCH-PREVIEW.md). AUR, AppImage, and broader desktop acceptance remain open.
 
 ## Mobile companions
 

@@ -92,9 +92,24 @@
               </svg>
               Download for Apple Silicon Mac
             </a>
+            <a
+              class="download"
+              href="{{archDownloadUrl}}"
+              aria-describedby="arch-preview-scope"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 16 16"
+                aria-hidden="true"
+              >
+                <path d="M8 2v8m-3-3 3 3 3-3M3 11v3h10v-3" />
+              </svg>
+              Download for Arch Linux x86_64 Preview
+            </a>
           </div>
-          <p class="release">DMG · v{{version}} · early alpha</p>
-          <p class="compatibility">Built and packaged on {{testedOn}}.</p>
+          <p class="release">Mac DMG · v{{version}} · early alpha</p>
+          <p class="compatibility">Mac build packaged on {{testedOn}}.</p>
           <p class="install-note">
             This alpha is not notarized.
             <a
@@ -102,18 +117,14 @@
               >Mac installation steps</a
             >
           </p>
-          <!-- arch-preview:start -->
-          <p class="release">
-            <a href="{{archDownloadUrl}}">Download Arch Linux x86_64 Preview</a>
-          </p>
-          <p class="install-note">
-            Signed-out local use ·
+          <p class="install-note" id="arch-preview-scope">
+            Arch Preview supports signed-out local use.
+            <br />
             <a
               href="https://github.com/Barbacoa08/scratchtree/blob/main/docs/ARCH-PREVIEW.md"
               >Arch installation and verification</a
             >
           </p>
-          <!-- arch-preview:end -->
         </div>
       </section>
       <figure class="preview">
