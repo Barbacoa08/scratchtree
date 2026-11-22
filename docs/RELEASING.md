@@ -1,16 +1,20 @@
 # Scratchtree prereleases
 
-Publish the Apple Silicon DMG and, when included, the Arch Linux x86_64 Preview package as separate assets on one GitHub prerelease. Build both from the same reviewed release commit. Releases are manual, and updates are manual on both platforms. The Apple Silicon DMG includes private-account Dexie Cloud synchronization; the retained alpha.5 installer uses local notes only. State the behavior of the exact installer being released, and do not infer publication authorization from source implementation. [README.md](../README.md#download-and-install) is the user-facing installation guide.
+Publish the Apple Silicon DMG and, when included, the Arch Linux x86_64 Preview package as separate assets on one GitHub prerelease. Build both from the same reviewed release commit. Desktop updates use manual downloads. The Apple Silicon DMG includes private-account Dexie Cloud synchronization. The retained alpha.5 installer uses local notes only. [README.md](../README.md#download-and-install) is the installation guide for the current public downloads.
 
-The Mac app is ad-hoc signed, **not Developer ID signed or notarized**. Production signing, credentials, notarization, and additional platform targets require separate decisions. The Mac release identifier is `tech.barbajoe.scratchtree`; data is stored separately from the application bundle. Alpha changes may break identity or format compatibility, but using actual notes requires a deliberate private backup and transfer plan first.
+The public Mac DMGs contain ad-hoc signed apps. The first Developer ID-signed, notarized DMG is still in private preparation and acceptance. Update this status and the public installation instructions after the first signed release is published and its download is verified.
+
+The Mac release identifier is `tech.barbajoe.scratchtree`. App data is stored separately from the bundle. Use a deliberate private backup and transfer plan before testing on actual notes. The procedure below covers direct distribution through GitHub and the website. Future Mac App Store distribution has its own requirements and is tracked in [DISCUSSIONS.md](../DISCUSSIONS.md#mac-app-store-distribution).
 
 ## Scope and prerequisites
 
 - Follow [CONTRIBUTING.md](../CONTRIBUTING.md), including independent reviews, verification, and source identity. Packaging is not a replacement for implementation acceptance.
-- Confirm the current task authorizes publishing a release. Code approval, a merged PR, or a past release does not grant standing publication or credential access. If publication is already authorized, complete the verified release without asking again. An explicit request to publish a Scratchtree release also authorizes its required website handoff: update the public download links, review and merge the documentation/metadata PR, and verify the existing automatic Netlify deployment. Complete those steps in the same task without a separate website request or permission prompt. This does not authorize an unrequested release, new signing credentials, or unrelated account/service changes.
+- Confirm current authorization for the private work being performed, including use of signing credentials and submission to Apple. A private candidate can be prepared and tested ahead of a publication decision. Verify publication authorization at the [publication step](#release-notes-upload-and-publication).
 - Use the README's pinned Node, pnpm, and Rust versions, macOS command-line build prerequisites, the `aarch64-apple-darwin` Rust target, Python 3 for the checks below, and authenticated GitHub CLI access to `Barbacoa08/scratchtree`. Select the toolchains in the shell before running Tauri's child commands. Do not depend on another worktree's ignored toolchain/cache paths.
 - Start from a clean, freshly fetched, verified release commit, normally merged `origin/main`, in an isolated worktree. Record commit/tree IDs, tool versions, architecture, commands, outcomes, and omissions in a dated ignored `.projects/` task folder.
 - Never use an original third-party application profile or bundle personal notes, IndexedDB/SQLite profiles, backups, exports, private captures, credentials, or scratch directories. New installations start empty. Do not launch against an existing user profile merely to package the installer.
+- For Developer ID signing, use the authorized signing Mac with a valid **Developer ID Application** identity and its matching private key in Keychain. Select the exact identity from `security find-identity -v -p codesigning`. If the trust chain is missing its intermediate, use [Apple's Developer ID intermediate guidance](https://developer.apple.com/support/developer-id-intermediate-certificate/). Keep trust settings intact.
+- Keep notarization credentials in a local Keychain profile. Use `xcrun notarytool store-credentials` interactively when setting up the profile. Keep passwords, private keys, certificate requests, account identifiers, local Keychain profile names, and raw receipts out of Git, public CI output, and release assets. The documented profile and identity variables below are local inputs. [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
 
 For a prose-only PR, documentation checks are sufficient and no new installer is needed. For a runtime release, verify the selected source under the contributor guide, and record the applicable packaged native checks and their limits. If a squash merge leaves the complete tracked tree identical to the tested PR head, retain both identities and the verified tree equality; do not imply a fresh test run occurred. Build the release afresh from the selected clean commit.
 
@@ -20,8 +24,10 @@ The shell examples assume the repository root and one continuing shell. Keep err
 
 ```sh
 set -eu
+umask 022
 gh release list --repo Barbacoa08/scratchtree
 release_tag='v0.2.0' # Use the explicitly approved, unused version.
+release_signing=developer-id # Use ad-hoc only for an explicitly authorized ad-hoc build.
 # Keep GitHub's prerelease flag while the application remains in alpha.
 
 git fetch origin --prune
@@ -47,14 +53,23 @@ test -z "$(git status --porcelain)"
 mkdir "$release_dir/staging" "$release_dir/assets"
 release_app="$release_dir/staging/Scratchtree.app"
 ditto "$release_target_dir/aarch64-apple-darwin/release/bundle/macos/Scratchtree.app" "$release_app"
-codesign --force --sign - --timestamp=none \
-  --identifier tech.barbajoe.scratchtree "$release_app"
+case "$release_signing" in
+  developer-id)
+    : "${release_identity:?Set the fingerprint of the verified local Developer ID Application identity}"
+    codesign --force --sign "$release_identity" --options runtime --timestamp "$release_app"
+    ;;
+  ad-hoc)
+    codesign --force --sign - --timestamp=none \
+      --identifier tech.barbajoe.scratchtree "$release_app"
+    ;;
+  *) exit 1 ;;
+esac
 codesign --verify --deep --strict --verbose=2 "$release_app"
-codesign -dv --verbose=4 "$release_app" 2> "$release_dir/signature.txt"
+codesign --display --verbose=4 --requirements - "$release_app" > "$release_dir/app-signature.txt" 2>&1
 ln -s /Applications "$release_dir/staging/Applications"
 ```
 
-`--no-sign` builds without a signing identity; the subsequent `codesign --sign -` seals only the staged copy ad hoc. Do not change keychain, account, certificate, or notarization settings for this procedure. The checked-in `tauri:build` command makes the release app bundle, not a DMG or a published release. Ordinary `tauri:dev` and `tauri:preview` commands use the checked-in Preview override; disposable probes still require their own explicitly authorized identity.
+`--no-sign` skips Tauri's signing step. Sign only the staged copy with the selected method. For Developer ID, verify the expected team and authority, secure timestamp, Hardened Runtime, and designated requirement. If future bundles introduce nested executable code, sign it inside out before sealing the outer app. The checked-in `tauri:build` command produces the app bundle. Ordinary `tauri:dev` and `tauri:preview` commands use the Preview override. A disposable probe requires its own authorized identity.
 
 Read `Contents/Info.plist` and confirm product name, bundle identifier, executable, and internal version against the selected source configuration. Run `lipo -archs` on that executable and require `arm64`. Record `vtool -show-build` output; do not claim an older macOS version is supported merely because the plist lists it. Record every staged bundle file's relative path and SHA-256, and inspect its complete contents, including symlinks, against the expected application resources. Never copy a running app's data directory into staging. The staging root must contain only the application and the `/Applications` symlink.
 
@@ -78,6 +93,52 @@ test ! -e "$release_dmg"
 hdiutil create -volname 'Scratchtree' -fs HFS+ \
   -srcfolder "$release_dir/staging" -format UDZO -imagekey zlib-level=9 \
   "$release_dmg" > "$release_dir/create-dmg.log" 2>&1
+if [ "$release_signing" = developer-id ]; then
+  codesign --sign "$release_identity" --timestamp "$release_dmg"
+  codesign --verify --strict --verbose=2 "$release_dmg"
+  codesign --display --verbose=4 "$release_dmg" > "$release_dir/dmg-signature.txt" 2>&1
+fi
+```
+
+### Notarize and staple the Developer ID DMG
+
+Confirm the outer DMG signature has the expected Developer ID authority, team, and timestamp. Retain a pre-notarization hash to identify the exact bytes uploaded to Apple. Set `release_notary_profile` to the name of the authorized local Keychain profile outside this guide. Each new signed DMG needs its own notarization. The certificate and profile can be reused while valid.
+
+```sh
+test "$release_signing" = developer-id
+: "${release_notary_profile:?Set the local notarization Keychain profile name}"
+shasum -a 256 "$release_dmg" > "$release_dir/pre-notarization-sha256.txt"
+test ! -e "$release_dir/notary-submission.json"
+xcrun notarytool submit "$release_dmg" --keychain-profile "$release_notary_profile" \
+  --output-format json > "$release_dir/notary-submission.json"
+```
+
+Keep the submission receipt. Apple processes uploads asynchronously. Check the existing submission if waiting times out. If an upload result is unclear, check history before considering another submission. A different build can be submitted separately while a prior build is pending. Review Apple's log and resolve any signing warnings before continuing. Keep all receipts and logs in the ignored release task folder.
+
+```sh
+release_submission=$(plutil -extract id raw "$release_dir/notary-submission.json")
+xcrun notarytool wait "$release_submission" --keychain-profile "$release_notary_profile" \
+  --timeout 20m --output-format json > "$release_dir/notary-result.json"
+xcrun notarytool log "$release_submission" "$release_dir/notary-log.json" \
+  --keychain-profile "$release_notary_profile"
+test "$(plutil -extract status raw "$release_dir/notary-result.json")" = Accepted
+```
+
+After reviewing the log, staple the ticket to the same signed image. Compute the publication checksum from the final stapled file. Keep that file private through acceptance.
+
+```sh
+shasum -a 256 -c "$release_dir/pre-notarization-sha256.txt"
+xcrun stapler staple "$release_dmg"
+xcrun stapler validate "$release_dmg"
+codesign --verify --strict --verbose=2 "$release_dmg"
+spctl --assess --type open --context context:primary-signature --verbose=4 "$release_dmg"
+```
+
+### Inspect the exact final image
+
+For the Developer ID path, require the stapled ticket and a Gatekeeper assessment of **Notarized Developer ID**. For both signing methods, verify the final image on a read-only mount.
+
+```sh
 hdiutil verify "$release_dmg" > "$release_dir/verify-dmg.log" 2>&1
 
 release_mount="$release_dir/verify-mount"
@@ -98,21 +159,31 @@ hdiutil attach -readonly -noautoopen -nobrowse \
 release_mounted=true
 ```
 
-The trap detaches the successfully attached image if a later check exits or is interrupted. Keep it active through inspection; equivalent verification scripts must use a cleanup/finally guard. If detachment fails, stop, retain the mount context, and resolve it without forcing unmounts. Check the returned mount point before reading it. Verify all of the following before upload:
+The trap detaches the successfully attached image if a later check exits or is interrupted. Keep it active through inspection. Equivalent verification scripts must use a cleanup/finally guard. If detachment fails, stop, retain the mount context, and resolve it without forcing unmounts. Check the returned mount point before reading it. Verify all of the following before uploading any release assets to GitHub:
 
 1. The volume contains only the expected app, Applications shortcut, and ordinary filesystem metadata. The shortcut is a symlink to `/Applications`.
 2. The mounted app's complete file/symlink inventory matches staging, and all file hashes equal the recorded signed manifest. Check identifier, internal version, executable, and arm64 architecture again on the mounted app.
-3. `codesign --verify --deep --strict` succeeds on the mounted application. Signature integrity establishes an intact ad-hoc seal; it does not establish Developer ID trust or notarization.
+3. `codesign --verify --deep --strict` succeeds on the mounted application. For a Developer ID build, assessment of the mounted app must also report **Notarized Developer ID**.
 4. There are no bundled notes, profiles, databases, exports, backups, credentials, or unrelated artifacts.
 5. The image is detached successfully. Never leave a failed verification mount behind or upload after a failed check.
 
 ```sh
 codesign --verify --deep --strict "$release_mount/Scratchtree.app"
+if [ "$release_signing" = developer-id ]; then
+  spctl --assess --type execute --verbose=4 "$release_mount/Scratchtree.app"
+fi
 release_cleanup
 trap - EXIT HUP INT TERM
+shasum -a 256 "$release_dmg" > "$release_dir/final-dmg-sha256.txt"
 ```
 
-`hdiutil` may print deprecation notices on newer macOS versions. This is the verified packaging procedure used for the current alpha; record actual tool behavior and validate an alternative before changing the process.
+`hdiutil` may print deprecation notices on newer macOS versions. Record actual tool behavior and validate an alternative before changing the process.
+
+### Accept the private Developer ID candidate
+
+Use an isolated Mac environment and synthetic data. Test a fresh private download of the final image and compare its SHA-256 with `final-dmg-sha256.txt` before installation. Keep normal macOS security settings and download quarantine intact. Check the Applications install and first launch. macOS may show its standard Internet download confirmation. A Gatekeeper block requiring a System Settings exception fails the Developer ID acceptance check. Keep managed-device restrictions separate from the normal launch result. [Apple's opening guidance](https://support.apple.com/en-us/102445)
+
+For the first signed release, also replace the exact supported ad-hoc build in an isolated profile using the designated test account. Export a safety backup before replacement. Record the build identities and designated requirements, Keychain prompts, saved sign-in, local notes and drafts, sync, and an offline relaunch. Verify signed-to-signed update continuity on subsequent releases. Package checks alone cannot establish launch or retained account access. Keep the candidate private until applicable acceptance passes and publication is authorized.
 
 ## Stage the Arch Linux x86_64 Preview
 
@@ -124,13 +195,18 @@ Describe Arch as an experimental signed-out Preview tested on virtual X11 with A
 
 ## Release notes, upload, and publication
 
+Confirm publication is authorized before creating the GitHub draft and uploading any installer assets. A merged source or documentation PR does not grant publication authorization. An authorized release includes updating the public download links, reviewing and merging the metadata PR, and verifying the automatic Netlify deployment and public downloads. Complete that website handoff in the release task.
+
 Write release notes inside the task folder. Include changes, exact source identity, actual verification/omissions, tested platform and account/synchronization limits, internal version, signing status, and installation instructions. Record the current BackupV8 contract and application identity. Earlier profiles and exports are not opened or migrated automatically. Before moving from the last pre-sync alpha.5, preserve an unchanged private BackupV7 and working recovery installer, use the separate local-only converter, validate its BackupV8 output, import it, and verify a fresh export. Keep each Mac’s distinct export until its intended data is verified. Do not bundle the converter, old reader, or actual exports in the product. Restore **replaces** the destination library and, while signed in, the shared library on every Mac. Drafts and Undo import only on that device; older offline work remains recoverable. Test native account/code persistence, offline reopen, sign-out/no-transport restart, two-client convergence, rejected-input recovery, and converted backup round trip before claiming those release features. Historical public alpha releases may be removed only under applicable task authorization and after a working recovery path exists.
 
 For an ad-hoc release, install the app in Applications, try opening it, click **Done** on the warning, then open **System Settings → Privacy & Security → Security** and click **Open Anyway**. See the [installation steps](../README.md#download-and-install) and the linked Apple illustration. Authenticate if prompted and confirm **Open**. Proceed only if you trust the download. Link [Apple's per-app opening instructions](https://support.apple.com/en-us/102445) and note that managed Macs may restrict opening. Do not prescribe disabling system-wide protections or removing quarantine attributes.
 
+For a verified Developer ID release, describe the drag-to-Applications installation and the standard first-open confirmation. Document actual findings from the signed upgrade test separately from Gatekeeper. Update the public installation guidance when the signed installer is published. Desktop updates remain manual; updater design and Mac App Store distribution have separate [discussion entries](../DISCUSSIONS.md#desktop-updates).
+
 Stage only the approved installer files in `assets`. Generate one checksum manifest over the exact installers and create the draft prerelease. For the combined example, first set `arch_package_name` to the verified Arch package basename. For a Mac-only prerelease, set `release_assets=("$release_name")` and use the matching title.
 
 ```bash
+shasum -a 256 -c "$release_dir/final-dmg-sha256.txt"
 release_assets=("$release_name" "$arch_package_name")
 release_title="Scratchtree $release_label — Apple Silicon and Arch Preview"
 (

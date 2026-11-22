@@ -45,7 +45,7 @@ Use **Export backup**, then **Download backup**, to keep a separate BackupV8 fil
 
 1. Export a backup before updating, and quit older app copies. The older alpha.5 uses a different backup format: prepare a converted BackupV8 copy before importing it into 0.2.8. See [Transfer from alpha.5](#transfer-from-alpha5) below.
 2. Open the downloaded DMG, drag Scratchtree to Applications, and replace the existing app if prompted. Your app data is stored separately from the app.
-3. Open Scratchtree from Applications. This alpha is ad-hoc signed, but is not Developer ID signed or notarized, so macOS may block the first launch.
+3. Open Scratchtree from Applications. The linked Mac build uses an ad-hoc signature, so macOS may block the first launch. The first Developer ID-signed and notarized download is pending private acceptance and publication.
 4. If macOS blocks Scratchtree because it can’t verify the developer, click **Done**. Open **System Settings → Privacy & Security**, scroll to **Security**, and choose **Open Anyway** for Scratchtree.
 5. Authenticate if prompted, and confirm **Open**.
 
@@ -175,6 +175,6 @@ Failure tests use isolated IndexedDB, injected public transport interfaces, and 
 
 ## Boundaries
 
-Domain, search, and rendering policy live in `src/lib/domain`; the controller owns keyed buffers and serialized commands in `src/lib/workspace`; `src/lib/sync` owns the current backup, Dexie Repository, confirmation, Session, and detached reconciliation. The typed Repository boundary stays in `src/lib/platform`. Svelte owns view/CodeMirror lifecycles, and Rust retains narrow platform operations. Public sign-up, version history, automatic updates, mobile, attachments, and Developer ID signing/notarization remain future work. A local save, a connected socket, and successful authentication each differ from independently confirmed synchronization.
+Domain, search, and rendering policy live in `src/lib/domain`; the controller owns keyed buffers and serialized commands in `src/lib/workspace`; `src/lib/sync` owns the current backup, Dexie Repository, confirmation, Session, and detached reconciliation. The typed Repository boundary stays in `src/lib/platform`. Svelte owns view/CodeMirror lifecycles, and Rust retains narrow platform operations. Public sign-up, version history, automatic desktop updates, mobile, and attachments remain future work. A local save, a connected socket, and successful authentication each differ from independently confirmed synchronization.
 
 See [AGENTS.md](AGENTS.md) for repository responsibilities, [CONTRIBUTING.md](CONTRIBUTING.md) for development and review, [DISCUSSIONS.md](DISCUSSIONS.md) for open decisions, [docs/RELEASING.md](docs/RELEASING.md) for packaging and releases, and [.projects/README.md](.projects/README.md) for evidence retention. No public license is selected.

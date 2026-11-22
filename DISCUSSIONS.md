@@ -66,9 +66,15 @@ Mac comes first. Future iOS and Android companions are intended primarily for vi
 
 ## Developer ID signing and notarization
 
-**Deferred, likely until after MVP (2026-11-13).** Sharing with friends does not currently justify adding Developer ID signing and notarization. Continue distributing the ad-hoc signed, unnotarized DMG, with the existing first-launch instructions and managed-Mac limitations. Signing and notarization remain intended future work; their exact timing is not committed. This decision does not authorize enrollment, credential access, signing changes, or publication.
+**Accepted.** Use local Developer ID signing with Keychain-held credentials, Apple notarization, and a stapled ticket for the direct-download Apple Silicon DMG. Each new package goes through the [release guide](docs/RELEASING.md). Keep the first candidate private until clean installation and the supported signed-in upgrade from the ad-hoc release are verified. The current public DMG still uses the ad-hoc app signature and its existing opening instructions. Track the transition in [issue #6](https://github.com/Barbacoa08/scratchtree/issues/6).
 
-When revisited, use Apple Developer ID signing, notarization, and a stapled ticket for the GitHub DMG. Start with local signing and Keychain-held credentials, and verify the downloaded package and first-launch experience. The [Apple Developer Program](https://developer.apple.com/programs/) currently costs $99 USD per year, with regional pricing and applicable taxes; an existing suitable membership can cover Scratchtree. Recheck pricing and [Tauri's signing requirements](https://v2.tauri.app/distribute/sign/macos/) before implementation. Signing does not override employer application restrictions. See [issue #6](https://github.com/Barbacoa08/scratchtree/issues/6) and [the release guide](docs/RELEASING.md).
+## Desktop updates
+
+**Deferred.** Keep desktop updates manual through the Mac DMG and the Arch Preview package. After the signed Mac upgrade is verified, decide how both platforms should discover, verify, and apply newer builds, and how users can recover from a failed update. Preserve a manual download path. The browser editor's existing **Check for updates** action has its own [deployment workflow](docs/RELEASING.md#web-editor-deployment).
+
+## Mac App Store distribution
+
+**Planned for later.** Continue direct distribution through GitHub and the website for the current release path. Evaluate App Store signing and review requirements, sandbox compatibility, and how users would move notes or reconnect synced accounts when the store edition is in scope.
 
 ## Other repository decision
 
