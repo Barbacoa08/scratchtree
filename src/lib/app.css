@@ -493,28 +493,9 @@ kbd {
 .tok-comment {
   color: var(--muted);
 }
-.pending-capture {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex: none;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-  padding: 0.35rem 0.75rem;
-  border: 1px dashed var(--composer-border);
-  border-radius: 3px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-.pending-capture > :first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pending-capture > :last-child {
-  flex: none;
+.note-card.pending-capture {
+  border-style: dashed;
+  border-color: var(--composer-border);
 }
 .composer {
   position: relative;

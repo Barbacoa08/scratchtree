@@ -19,12 +19,14 @@ test('opens a real local workspace without sign-in and retains saved notes', asy
   await expect(
     page
       .getByRole('region', { name: 'Note stream' })
+      .getByRole('article', { name: 'Saved note' })
       .getByText('Local Markdown', { exact: true }),
   ).toBeVisible();
   await page.reload();
   await expect(
     page
       .getByRole('region', { name: 'Note stream' })
+      .getByRole('article', { name: 'Saved note' })
       .getByText('Local Markdown', { exact: true }),
   ).toBeVisible();
   expect(outside).toEqual([]);
@@ -58,6 +60,7 @@ test('a second tab cannot edit until the first closes', async ({
   await expect(
     page
       .getByRole('region', { name: 'Note stream' })
+      .getByRole('article', { name: 'Saved note' })
       .getByText('Handoff note', { exact: true }),
   ).toBeVisible();
   await page.close();
@@ -65,6 +68,7 @@ test('a second tab cannot edit until the first closes', async ({
   await expect(
     other
       .getByRole('region', { name: 'Note stream' })
+      .getByRole('article', { name: 'Saved note' })
       .getByText('Handoff note', { exact: true }),
   ).toBeVisible();
 });

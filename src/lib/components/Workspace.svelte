@@ -7,7 +7,7 @@
   import type { EditorState } from '@codemirror/state';
   import { isTauri } from '@tauri-apps/api/core';
   import MarkdownEditor from './MarkdownEditor.svelte';
-  import ItemCard from './ItemCard.svelte';
+  import ItemCard, { type PendingNote } from './ItemCard.svelte';
   import ColorPalette from './ColorPalette.svelte';
   import MoveDialog, { type MoveDestination } from './MoveDialog.svelte';
   import { SiblingDrag, siblingDragType } from '../workspace/sibling-drag';
@@ -299,12 +299,6 @@
   const pendingCaptureHint = 'Submit again when this save finishes';
   const sameLocation = (a: Location, b: Location) =>
     a.scope === b.scope && a.itemId === b.itemId;
-  let pendingCapture = $derived.by(() => {
-    const capture = viewState.pendingCapture;
-    return capture && sameLocation(capture.location, viewState.location)
-      ? capture
-      : null;
-  });
   let metadataView = $derived(
     JSON.stringify([
       captureKey,
@@ -402,6 +396,24 @@
       ? [activeNote, ...visibleNotes]
       : visibleNotes,
   );
+  let streamEntries = $derived.by(() => {
+    const capture = viewState.pendingCapture;
+    // A newly saved note takes the last sibling slot. Keep this projection
+    // separate from the saved entries used for selection, search, and actions.
+    return capture &&
+      !viewState.query.trim() &&
+      sameLocation(capture.location, viewState.location) &&
+      !shownEntries.some((item) => item.id === capture.id)
+      ? [
+          ...shownEntries,
+          {
+            id: capture.id,
+            markdown: capture.markdown,
+            pending: true,
+          } satisfies PendingNote,
+        ]
+      : shownEntries;
+  });
   $effect(() => {
     void metadataView;
     untrack(() => {
@@ -519,6 +531,20 @@
     stream
       ?.querySelector(`[data-entry-id="${selected}"]`)
       ?.scrollIntoView({ block: 'nearest' });
+  }
+  function revealNote(viewport: HTMLElement, card: HTMLElement) {
+    const rect = card.getBoundingClientRect();
+    const style = getComputedStyle(viewport);
+    const top = viewport.getBoundingClientRect().top + viewport.clientTop;
+    const above = rect.top - top - (parseFloat(style.scrollPaddingTop) || 0);
+    const below =
+      rect.bottom -
+      top -
+      viewport.clientHeight +
+      (parseFloat(style.scrollPaddingBottom) || 0);
+    if (above >= 0 && below > 0) viewport.scrollTop += Math.min(above, below);
+    else if (above < 0 && below <= 0)
+      viewport.scrollTop += Math.max(above, below);
   }
   async function openTree(
     id: string | null,
@@ -917,6 +943,34 @@
     try {
       const saved = controller.save(key);
       const capture = compose ? controller.state.pendingCapture : null;
+      let preview:
+        | {
+            viewport: HTMLElement;
+            card: HTMLElement;
+            scrollTop: number | null;
+          }
+        | undefined;
+      if (capture && stream) {
+        const viewport = stream;
+        const scrollTop = viewport.scrollTop;
+        await tick();
+        const card = viewport.querySelector<HTMLElement>(
+          `[data-pending-capture="${capture.id}"]`,
+        );
+        if (card) {
+          preview = { viewport, card, scrollTop: null };
+          if (
+            viewport === stream &&
+            viewport.scrollTop === scrollTop &&
+            request === interaction &&
+            epoch === workspaceEpoch &&
+            focus.mayRestore()
+          ) {
+            revealNote(viewport, card);
+            preview.scrollTop = viewport.scrollTop;
+          }
+        }
+      }
       if (!(await saved) || disposed || epoch !== workspaceEpoch) return;
       if (capture) {
         if (
@@ -944,7 +998,17 @@
           !focus.mayRestore()
         )
           return;
-        if (selected === capture.id) scrollSelection();
+        if (selected === capture.id) {
+          if (!preview) scrollSelection();
+          // Another writer may have inserted a sibling ahead of this card.
+          // Adjust only if the original reveal still owns the viewport.
+          else if (
+            preview.viewport === stream &&
+            preview.scrollTop === stream.scrollTop &&
+            preview.card.dataset.entryId === capture.id
+          )
+            revealNote(stream, preview.card);
+        }
         composer?.focus();
       } else if (focus.mayRestore()) {
         if (controller.state.activeKey === key) focusInline();
@@ -2333,7 +2397,8 @@
           bind:this={stream}
           onclick={(event) => void clearStreamSelection(event)}
         >
-          {#each shownEntries as entry (entry.id)}
+          {#each streamEntries as entry (entry.id)}
+            {@const item = 'pending' in entry ? null : entry}
             <ItemCard
               {commandLabel}
               bind:this={noteBodies[entry.id]}
@@ -2372,8 +2437,8 @@
               expanded={expandedNotes[entry.id] ?? false}
               outsideSearch={viewState.activeKey === entry.id &&
                 !visibleNotes.some((x) => x.id === entry.id)}
-              location={viewState.query.trim()
-                ? locationHierarchy.label(entry.parentId).text
+              location={item && viewState.query.trim()
+                ? locationHierarchy.label(item.parentId).text
                 : ''}
               onselect={(event) => cardClick(event, entry.id)}
               ondoubleclick={(event) => cardDoubleClick(event, entry.id)}
@@ -2391,7 +2456,9 @@
               ondelete={() => void remove(entry.id)}
               oncopy={() => void copy(entry.id)}
               oncopycode={(code) => void copyCode(code)}
-              ondone={() => void controller.setNoteDone(entry.id, !entry.done)}
+              ondone={() => {
+                if (item) void controller.setNoteDone(item.id, !item.done);
+              }}
               onsource={(source) => controller.editContext(entry.id, source)}
               onsubmit={() => void submit(entry.id)}
               onfinish={() => void finishEdit()}
@@ -2405,23 +2472,12 @@
               onexpand={(expanded) => (expandedNotes[entry.id] = expanded)}
             />
           {/each}
-          {#if !shownEntries.length}<p class="empty-stream">
+          {#if !streamEntries.length}<p class="empty-stream">
               {viewState.query
                 ? 'No saved notes match your search.'
                 : 'Capture your first note below.'}
             </p>{/if}
         </section>
-        {#if pendingCapture}
-          <div class="pending-capture" aria-hidden="true">
-            <span
-              >{pendingCapture.markdown
-                .trimStart()
-                .slice(0, 160)
-                .split(/\r\n|\r|\n/, 1)[0]}</span
-            >
-            <span>Saving note…</span>
-          </div>
-        {/if}
         <section class="composer" aria-label="Capture note">
           <div class="composer-toolbar">
             <button
