@@ -103,6 +103,75 @@ it('save retry and rapid repeated submission create exactly one note', async () 
   expect(repo.snapshot.items.filter((x) => x.kind === 'note')).toHaveLength(1);
   c.dispose();
 });
+it('a queued capture cannot write after its library binding changes', async () => {
+  const repo = Object.assign(new MemoryRepository(), { viewEpoch: 'original' });
+  const c = new WorkspaceController(repo);
+  await c.start();
+  c.editSource('keep this exact draft');
+  let release!: () => void;
+  repo.delayCheckpoint = new Promise<void>((r) => (release = r));
+  const checkpoint = c.flush();
+  await tick();
+  const saving = c.save();
+  repo.viewEpoch = 'replacement';
+  release();
+  await checkpoint;
+  expect(await saving).toBe(false);
+  expect(repo.snapshot.items).toEqual([]);
+  expect(c.state.source).toBe('keep this exact draft');
+  c.dispose();
+});
+
+it('an older navigation leaves a later queued capture in its original composer', async () => {
+  const repo = new MemoryRepository();
+  const c = new WorkspaceController(repo);
+  await c.start();
+  c.editSource('captured before leaving Root');
+  let release!: () => void;
+  repo.delayCheckpoint = new Promise<void>((r) => (release = r));
+  const navigation = c.openLocation({ scope: 'trash', itemId: null });
+  await tick();
+  const capture = c.save();
+  release();
+  expect(await navigation).toBe(true);
+  expect(await capture).toBe(true);
+  expect(c.state.location).toEqual({ scope: 'trash', itemId: null });
+  expect(repo.snapshot.items).toMatchObject([
+    {
+      parentId: null,
+      deletedAt: null,
+      markdown: 'captured before leaving Root',
+    },
+  ]);
+  c.dispose();
+});
+
+it('a failed capture reconciles against its bound epoch without adopting another library', async () => {
+  const boundReads: string[] = [];
+  const repo = Object.assign(new MemoryRepository(), {
+    viewEpoch: 'original',
+    async readBoundWorkspace(epoch: string) {
+      boundReads.push(epoch);
+      throw { code: 'library_replaced' };
+    },
+  });
+  const c = new WorkspaceController(repo);
+  await c.start();
+  const { loadWorkspace } = repo;
+  let afterFailureReads = 0;
+  repo.loadWorkspace = async () => {
+    afterFailureReads++;
+    return loadWorkspace.call(repo);
+  };
+  repo.fail = 'save';
+  c.editSource('uncertain exact source');
+  expect(await c.save()).toBe(false);
+  expect(boundReads).toEqual(['original']);
+  expect(afterFailureReads).toBe(0);
+  expect(c.state.source).toBe('uncertain exact source');
+  c.dispose();
+});
+
 it('disposal during delayed save emits no late state', async () => {
   const repo = new MemoryRepository();
   const c = new WorkspaceController(repo);

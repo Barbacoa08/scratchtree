@@ -296,6 +296,15 @@
   let composerEpochs = $state<Record<string, number>>({});
   let workspaceEpoch = $state(0);
   let captureKey = $derived(composeKey(viewState.location));
+  const pendingCaptureHint = 'Submit again when this save finishes';
+  const sameLocation = (a: Location, b: Location) =>
+    a.scope === b.scope && a.itemId === b.itemId;
+  let pendingCapture = $derived.by(() => {
+    const capture = viewState.pendingCapture;
+    return capture && sameLocation(capture.location, viewState.location)
+      ? capture
+      : null;
+  });
   let metadataView = $derived(
     JSON.stringify([
       captureKey,
@@ -900,30 +909,43 @@
     return { mayRestore: () => !moved && !disposed, stop };
   }
   async function submit(key: string) {
-    if (blocked) return;
+    const compose = composeOwner(key);
+    if (blocked || (compose && controller.state.pendingCapture)) return;
+    const request = interaction;
+    const epoch = workspaceEpoch;
     const focus = observeSubmissionFocus();
     try {
-      const known = new Set(viewState.snapshot.items.map((n) => n.id));
-      const ok = await controller.save(key);
-      if (!ok || disposed) return;
-      if (composeOwner(key)) {
-        if (!controller.sourceFor(key))
+      const saved = controller.save(key);
+      const capture = compose ? controller.state.pendingCapture : null;
+      if (!(await saved) || disposed || epoch !== workspaceEpoch) return;
+      if (capture) {
+        if (
+          controller.didClearCaptureDraft(capture.id) &&
+          controller.state.buffers[key]?.revision === capture.draft.revision + 1
+        )
           composerEpochs = {
             ...composerEpochs,
             [key]: (composerEpochs[key] ?? 0) + 1,
           };
-        setSelected(
-          controller.state.snapshot.items.find((n) => !known.has(n.id))?.id ??
-            selected,
-        );
+        if (
+          request === interaction &&
+          sameLocation(controller.state.location, capture.location) &&
+          focus.mayRestore() &&
+          visibleNotes.some((note) => note.id === capture.id)
+        )
+          setSelected(capture.id);
       }
       await tick();
-      if (composeOwner(key)) {
-        stream
-          ?.querySelector(`[data-note-id="${selected}"]`)
-          ?.scrollIntoView({ block: 'nearest' });
-        if (focus.mayRestore() && composeKey(controller.state.location) === key)
-          composer?.focus();
+      if (capture) {
+        if (
+          request !== interaction ||
+          epoch !== workspaceEpoch ||
+          !sameLocation(controller.state.location, capture.location) ||
+          !focus.mayRestore()
+        )
+          return;
+        if (selected === capture.id) scrollSelection();
+        composer?.focus();
       } else if (focus.mayRestore()) {
         if (controller.state.activeKey === key) focusInline();
         else stream?.focus();
@@ -2037,11 +2059,13 @@
         onmodalchange={(active) => (recoveryModal = active)}
       />{/if}
     <p class:sr-only={compact} role="status" aria-live="polite">
-      {keyboardOrder &&
-      !viewState.query.trim() &&
-      !viewState.keyboardReorderError
-        ? 'Order unsaved'
-        : viewState.status}
+      {#if viewState.pendingCapture}
+        Saving note… <span class="sr-only">{pendingCaptureHint}.</span>
+      {:else if keyboardOrder && !viewState.query.trim() && !viewState.keyboardReorderError}
+        Order unsaved
+      {:else}
+        {viewState.status}
+      {/if}
     </p>
     <p role="alert">{viewState.keyboardReorderError || viewState.error}</p>
     {#if paletteRetry && viewState.mutationRetry && paletteRetry.epoch === workspaceEpoch && paletteRetry.identity === controller.mutationRetryIdentity}
@@ -2387,11 +2411,23 @@
                 : 'Capture your first note below.'}
             </p>{/if}
         </section>
+        {#if pendingCapture}
+          <div class="pending-capture" aria-hidden="true">
+            <span
+              >{pendingCapture.markdown
+                .trimStart()
+                .slice(0, 160)
+                .split(/\r\n|\r|\n/, 1)[0]}</span
+            >
+            <span>Saving note…</span>
+          </div>
+        {/if}
         <section class="composer" aria-label="Capture note">
           <div class="composer-toolbar">
             <button
               onclick={() => submit(captureKey)}
               disabled={blocked}
+              aria-disabled={viewState.pendingCapture !== null}
               aria-label="Save note"
               title={captureFenced ? 'Save note' : 'Save note (Enter)'}
               >➤</button
@@ -2416,7 +2452,10 @@
             oncontext={(fenced) => (captureFenced = fenced)}
           />
           <p class="hint">
-            {#if captureFenced}
+            {#if viewState.pendingCapture}
+              {#if captureFenced}Enter adds a code line ·
+              {/if}{pendingCaptureHint}
+            {:else if captureFenced}
               Enter adds a code line · Move outside code to save
             {:else}
               <span

@@ -90,6 +90,7 @@ function errorMessage(error: unknown) {
 
 export interface ViewState {
   snapshot: WorkspaceSnapshot;
+  pendingCapture: CaptureItem | null;
   keyboardOrder: readonly string[] | null;
   keyboardReorderIds: readonly string[] | null;
   keyboardReorderLocation: Location | null;
@@ -114,6 +115,7 @@ export interface ViewState {
 export class WorkspaceController {
   state: ViewState = {
     snapshot: emptyWorkspace(),
+    pendingCapture: null,
     keyboardOrder: null,
     keyboardReorderIds: null,
     keyboardReorderLocation: null,
@@ -151,6 +153,7 @@ export class WorkspaceController {
   private completionIntent = 0;
   private viewIntent = 0;
   private captureIntents = new Map<string, CaptureItem>();
+  private clearedCaptureId: string | null = null;
   // In-memory acknowledgment state preserves a pending Save's original identity
   // after a structural command reconciles its committed write.
   private reconciledCaptures = new Set<string>();
@@ -1053,6 +1056,9 @@ export class WorkspaceController {
   feedback(status: string, error = '') {
     this.patch({ status, error });
   }
+  didClearCaptureDraft(id: string) {
+    return this.clearedCaptureId === id;
+  }
   setQuery(query: string) {
     this.queryRevision++;
     this.patch({ query });
@@ -1089,8 +1095,22 @@ export class WorkspaceController {
       markdown: buffer.source,
       draft: { key, revision: buffer.revision },
     };
-    this.captureIntents.set(key, request);
+    const epoch = this.snapshotEpoch;
+    const ownsEpoch = () =>
+      this.snapshotEpoch === epoch && this.repo.viewEpoch === epoch;
+    const readCapturedWorkspace = () =>
+      epoch != null && this.repo.readBoundWorkspace
+        ? this.repo.readBoundWorkspace(epoch)
+        : this.repo.loadWorkspace();
+    const captureReplaced = () =>
+      new Error('The library changed before the note finished saving.');
+    this.clearedCaptureId = null;
     this.saving = this.run(async () => {
+      if (!ownsEpoch()) {
+        this.error(captureReplaced());
+        return false;
+      }
+      this.captureIntents.set(key, request);
       this.patch({ operation: 'save', error: '', status: 'Saving…' });
       try {
         // A committed child can travel with its owner across scopes before a
@@ -1116,16 +1136,21 @@ export class WorkspaceController {
             : request;
         const known = this.reconciledCaptures.has(request.id);
         const s = known
-          ? await this.repo.loadWorkspace()
+          ? await readCapturedWorkspace()
           : await this.repo.captureItem(replay);
+        if (!ownsEpoch()) {
+          this.error(captureReplaced());
+          return false;
+        }
         if (known && !s.items.some((x) => x.id === request.id))
           throw new Error(
             'The saved capture is unavailable. Your newer draft is retained.',
           );
         this.captureIntents.delete(key);
         this.reconciledCaptures.delete(request.id);
-        this.snapshot(s);
+        this.snapshot(s, { pendingCapture: null });
         if (this.state.buffers[key]?.revision === request.draft.revision) {
+          this.clearedCaptureId = request.id;
           this.dirty.delete(key);
           const buffers = { ...this.state.buffers };
           // Advance the revision even when clearing to distinguish subsequent captures.
@@ -1143,16 +1168,19 @@ export class WorkspaceController {
         // A successful authoritative read can prove this creation never committed.
         // Otherwise keep its immutable request: generic failure codes alone do not
         // distinguish a rejected write from a committed write with a lost reply.
-        try {
-          const current = await this.repo.loadWorkspace();
-          if (
-            !current.items.some(
-              (item) => item.id.toLowerCase() === request.id.toLowerCase(),
+        if (!isReplacedLibrary(e) && ownsEpoch()) {
+          try {
+            const current = await readCapturedWorkspace();
+            if (
+              ownsEpoch() &&
+              !current.items.some(
+                (item) => item.id.toLowerCase() === request.id.toLowerCase(),
+              )
             )
-          )
-            this.captureIntents.delete(key);
-        } catch {
-          // Unavailable reconciliation leaves the original request retryable.
+              this.captureIntents.delete(key);
+          } catch {
+            // Unavailable reconciliation leaves the original request retryable.
+          }
         }
         this.error(e);
         return false;
@@ -1161,7 +1189,10 @@ export class WorkspaceController {
       }
     }).finally(() => {
       this.saving = null;
+      if (this.state.pendingCapture?.id === request.id)
+        this.patch({ pendingCapture: null });
     });
+    this.patch({ pendingCapture: request });
     return this.saving;
   }
   // Continuing the same active edit supersedes an older blur-owned exit.

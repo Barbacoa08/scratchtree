@@ -55,5 +55,9 @@ test('an invalid import keeps the active notes', async ({ page }) => {
   await expect(
     page.getByRole('button', { name: 'Replace library', exact: true }),
   ).toHaveCount(0);
-  await expect(page.getByText('Keep my notes', { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole('region', { name: 'Note stream' })
+      .getByText('Keep my notes', { exact: true }),
+  ).toBeVisible();
 });

@@ -33,7 +33,11 @@ test('the published editor reopens offline after a browser restart', async ({
       page.getByText('Ready to reopen offline', { exact: true }),
     ).toBeVisible({ timeout: 15000 });
     await save(page, 'Offline **note**');
-    await expect(page.getByText('Offline note', { exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole('region', { name: 'Note stream' })
+        .getByText('Offline note', { exact: true }),
+    ).toBeVisible();
     await page
       .getByRole('textbox', { name: 'New note Markdown' })
       .fill('Offline draft');
@@ -47,7 +51,11 @@ test('the published editor reopens offline after a browser restart', async ({
     });
     page = context.pages()[0];
     await page.goto('/');
-    await expect(page.getByText('Offline note', { exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole('region', { name: 'Note stream' })
+        .getByText('Offline note', { exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole('textbox', { name: 'New note Markdown' }),
     ).toHaveText('Offline draft');
@@ -105,7 +113,9 @@ test('an incomplete initial asset cache leaves editing available', async ({
     ).toBeVisible({ timeout: 15000 });
     await save(page, 'Keep this local note');
     await expect(
-      page.getByText('Keep this local note', { exact: true }),
+      page
+        .getByRole('region', { name: 'Note stream' })
+        .getByText('Keep this local note', { exact: true }),
     ).toBeVisible();
   } finally {
     await request.post('/__test_release/a');
