@@ -15,6 +15,16 @@ tauri-plugin-clipboard-manager = "=2.5.0"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 uuid = { version = "=1.29.2", features = ["v4", "serde"] }
+semver = { version = "=1.0.28", features = ["serde"] }
+url = "=2.5.8"
+reqwest = { version = "=0.13.5", default-features = false, features = ["native-tls"] }
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+base64 = "=0.23.1"
+flate2 = "=1.1.11"
+minisign-verify = "=0.3.0"
+plist = "=1.10.3"
+tar = "=0.4.46"
+tauri-plugin-updater = { version = "=2.14.1", default-features = false }
 [dev-dependencies]
 tempfile = "=3.27.0"
 [profile.dev]
