@@ -4,11 +4,11 @@ Scratchtree Preview targets current Arch Linux x86_64 for signed-out use with sy
 
 ## Get the package
 
-Download the [0.2.8 Arch Linux x86_64 Preview package](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.8/scratchtree-preview-0.2.8-1-x86_64.pkg.tar.zst) and [SHA256SUMS-arch.txt](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.8/SHA256SUMS-arch.txt) from the [same GitHub prerelease](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.2.8). In the download directory on an up-to-date Arch x86_64 installation, verify the Arch entry and install the package.
+Download the [0.3.0 Arch Linux x86_64 Preview package](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.0/scratchtree-preview-0.3.0-1-x86_64.pkg.tar.zst) and [SHA256SUMS.txt](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.0/SHA256SUMS.txt) from the [same GitHub prerelease](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.3.0). In the download directory on an up-to-date Arch x86_64 installation, verify the Arch entry and install the package.
 
 ```sh
-package='scratchtree-preview-0.2.8-1-x86_64.pkg.tar.zst'
-checksum=$(awk -v package="$package" '$2 == package { print }' SHA256SUMS-arch.txt) &&
+package='scratchtree-preview-0.3.0-1-x86_64.pkg.tar.zst'
+checksum=$(awk -v package="$package" '$2 == package { print }' SHA256SUMS.txt) &&
   test -n "$checksum" &&
   printf '%s\n' "$checksum" | sha256sum --check - &&
   sudo pacman -U "./$package"
