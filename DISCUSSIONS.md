@@ -70,7 +70,7 @@ Mac comes first. Future iOS and Android companions are intended primarily for vi
 
 ## Desktop updates
 
-**Deferred.** Keep desktop updates manual through the Mac DMG and the Arch Preview package. After the signed Mac upgrade is verified, decide how both platforms should discover, verify, and apply newer builds, and how users can recover from a failed update. Preserve a manual download path. The browser editor's existing **Check for updates** action has its own [deployment workflow](docs/RELEASING.md#web-editor-deployment).
+**Accepted.** Show **Update available** near the bottom of the left panel, above the account action, with the offered version and a full-width button. A configured desktop build checks when the workspace opens. Installation requires an explicit choice and a successful save. Direct-download Mac builds use a signed updater archive and preserve the DMG as a manual and recovery path. Arch Preview hands off to pacman and keeps the manual package download. Public feeds depend on private packaged acceptance, and Arch package signing remains a separate decision. The browser editor's existing **Check for updates** action has its own [deployment workflow](docs/RELEASING.md#web-editor-deployment).
 
 ## Mac App Store distribution
 

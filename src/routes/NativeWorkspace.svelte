@@ -10,11 +10,16 @@
   import type { PersistentSession } from '../lib/sync/session';
   import type { WorkspaceController } from '../lib/workspace/controller';
   import { cloudConfiguration } from '../lib/sync/configuration';
+  import {
+    desktopUpdatePort,
+    type DesktopUpdatePort,
+  } from '../lib/platform/desktop-updates';
   let auth: AuthPort | undefined = $state();
   let sync: SyncPort | undefined = $state();
   let repository: Repository | undefined = $state();
   let ready = $state<((c: WorkspaceController) => void) | undefined>();
   let windowAdapter: CloseAdapter | undefined = $state();
+  let desktopUpdates: DesktopUpdatePort | undefined = $state();
   const appearance = getAppearance();
   let phase = $state<'idle' | 'opening' | 'failed' | 'ready'>('idle');
   let retryButton = $state<HTMLButtonElement>();
@@ -60,6 +65,14 @@
         controller.signal.throwIfAborted();
         repository = fixture.repository;
         ready = fixture.ready;
+        if (parameters.has('desktopUpdate')) {
+          const updates = await import('../../tests/fixtures/desktop-updates');
+          controller.signal.throwIfAborted();
+          desktopUpdates = updates.fixtureDesktopUpdates(
+            parameters.get('desktopUpdate'),
+            fixture.repository,
+          );
+        }
         if (parameters.has('lifecycle')) windowAdapter = fixture.windowAdapter;
         if (parameters.has('authFixture')) {
           const authFixture = await import('../../tests/fixtures/auth-ui');
@@ -94,6 +107,7 @@
           return;
         }
         session = candidate;
+        if (isTauri()) desktopUpdates = desktopUpdatePort;
         repository = candidate.repository;
         auth = candidate.auth;
         sync = candidate.sync;
@@ -131,6 +145,7 @@
     {auth}
     {sync}
     {windowAdapter}
+    {desktopUpdates}
     appearance={appearance.preference}
     onappearancechange={appearance.setPreference}
     onready={ready}

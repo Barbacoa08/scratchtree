@@ -1,3 +1,4 @@
+mod desktop_update;
 mod external;
 pub mod files;
 pub mod model;
@@ -133,7 +134,12 @@ async fn recovery_abort(
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[allow(unused_mut)]
+    let mut context = tauri::generate_context!();
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let builder = desktop_update::mac::configure(builder, &mut context);
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_opener::Builder::new()
@@ -163,9 +169,11 @@ pub fn run() {
             recovery_begin,
             recovery_append,
             recovery_finish,
-            recovery_abort
+            recovery_abort,
+            desktop_update::desktop_update_check,
+            desktop_update::desktop_update_install
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Cannot start Scratchtree")
         .run(|app, event| {
             // Reuse the hidden webview: rebuilding it would lose session/editor state.
@@ -176,6 +184,12 @@ pub fn run() {
                     let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
+                }
+            }
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            if let tauri::RunEvent::ExitRequested { ref api, .. } = event {
+                if desktop_update::mac::defer_exit(app, api) {
+                    return;
                 }
             }
             if matches!(

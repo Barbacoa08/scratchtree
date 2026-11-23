@@ -18,6 +18,8 @@
   import ThemeSelector from './ThemeSelector.svelte';
   import SignInDialog from './SignInDialog.svelte';
   import SyncStatus from './SyncStatus.svelte';
+  import DesktopUpdate from './DesktopUpdate.svelte';
+  import type { DesktopUpdatePort } from '../platform/desktop-updates';
   import type {
     AuthPort,
     AuthState,
@@ -65,6 +67,7 @@
     windowAdapter,
     browserBackup,
     webActions,
+    desktopUpdates,
     webSuspended = false,
     appearance = 'system',
     onappearancechange = () => {},
@@ -75,6 +78,7 @@
     windowAdapter?: CloseAdapter;
     browserBackup?: BrowserBackupFiles;
     webActions?: Snippet;
+    desktopUpdates?: DesktopUpdatePort;
     webSuspended?: boolean;
     appearance?: AppearancePreference;
     onappearancechange?: (preference: AppearancePreference) => void;
@@ -403,7 +407,9 @@
         mouseSelection = next;
     });
   });
-  let modal = $derived(
+  let desktopUpdateOpen = $state(false);
+  let windowClosePending = $state(false);
+  let workspaceModal = $derived(
     !!viewState.preview ||
       closeFailed ||
       !!moveSession ||
@@ -411,6 +417,7 @@
       authState.phase === 'signing-out' ||
       recoveryModal,
   );
+  let modal = $derived(desktopUpdateOpen || workspaceModal);
   let operationBlocked = $derived(
     webSuspended ||
       (viewState.operation !== null && viewState.operation !== 'save') ||
@@ -785,7 +792,19 @@
     if (windowAdapter || isTauri())
       detach = attachCloseGuard(
         {
-          onCloseRequested: closeAdapter.onCloseRequested,
+          onCloseRequested: (handler) =>
+            closeAdapter.onCloseRequested(async (event) => {
+              if (desktopUpdateOpen || windowClosePending) {
+                event.preventDefault();
+                return;
+              }
+              windowClosePending = true;
+              try {
+                await handler(event);
+              } finally {
+                windowClosePending = false;
+              }
+            }),
           finishClose,
         },
         () => controller.flush(),
@@ -1921,6 +1940,26 @@
         true,
       );
   }
+  function desktopInstallBlocked() {
+    return (
+      !viewState.loaded ||
+      workspaceModal ||
+      windowClosePending ||
+      !!authState.pendingRecovery ||
+      syncActionActive ||
+      !!syncState.overflow ||
+      !!syncState.readOnlyRecovery ||
+      viewState.mutationRetry ||
+      !!viewState.completionRetry ||
+      (viewState.operation !== null && viewState.operation !== 'save')
+    );
+  }
+  async function checkpointForDesktopUpdate() {
+    await tick();
+    if (desktopInstallBlocked()) return 'blocked';
+    if (!(await controller.flush())) return 'save-failed';
+    return desktopInstallBlocked() ? 'blocked' : 'ready';
+  }
   function showCloseFailure() {
     if (!closeFailed)
       closeReturnFocus =
@@ -2184,6 +2223,14 @@
               : undefined}><Icon name="undo" /> Undo delete</button
           >
         </div>
+        {#if desktopUpdates && viewState.loaded}
+          <DesktopUpdate
+            port={desktopUpdates}
+            blocked={operationBlocked || windowClosePending}
+            beforeInstall={checkpointForDesktopUpdate}
+            onmodalchange={(open) => (desktopUpdateOpen = open)}
+          />
+        {/if}
         {#if webActions}<div class="auth-footer">
             {@render webActions()}
           </div>{:else}<div class="auth-footer">

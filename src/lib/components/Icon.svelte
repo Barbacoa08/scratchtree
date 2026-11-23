@@ -18,6 +18,7 @@
       | 'trash'
       | 'account'
       | 'sync'
+      | 'update'
       | 'warning'
       | 'check';
   } = $props();
@@ -28,6 +29,9 @@
   {:else if name === 'check'}<path d="m3 8 3 3 7-7" />
   {:else if name === 'account'}<circle cx="8" cy="5" r="2.5" /><path
       d="M3 14c0-3 2-4.5 5-4.5s5 1.5 5 4.5"
+    />
+  {:else if name === 'update'}<circle cx="8" cy="8" r="6" /><path
+      d="M8 11V5m-2.5 2.5L8 5l2.5 2.5"
     />
   {:else if name === 'sync'}<path
       d="M3 6a5 5 0 0 1 9-2l1 1M13 2v3h-3M13 10a5 5 0 0 1-9 2l-1-1M3 14v-3h3"
