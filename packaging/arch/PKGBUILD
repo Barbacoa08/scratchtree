@@ -5,7 +5,8 @@ pkgrel=1
 pkgdesc='Scratchtree Markdown notes, experimental desktop preview'
 arch=('x86_64')
 url='https://github.com/Barbacoa08/scratchtree'
-depends=('glibc' 'gtk3' 'hicolor-icon-theme' 'libx11' 'openssl' 'webkit2gtk-4.1' 'xdg-utils')
+# The Ubuntu 24.04 build links against OpenSSL 3.
+depends=('glibc' 'gtk3' 'hicolor-icon-theme' 'libx11' 'openssl-3' 'webkit2gtk-4.1' 'xdg-utils')
 options=('!strip' '!debug')
 source=('scratchtree-preview.deb')
 noextract=("${source[@]}")
