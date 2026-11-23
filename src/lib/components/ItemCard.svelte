@@ -1,6 +1,10 @@
+<script module lang="ts">
+  import type { Item } from '../domain/notes';
+  export type PendingNote = Pick<Item, 'id' | 'markdown'> & { pending: true };
+</script>
+
 <script lang="ts">
   import type { EditorState } from '@codemirror/state';
-  import type { Item } from '../domain/notes';
   import { itemLabel } from '../domain/hierarchy';
   import TreeIcon from './TreeIcon.svelte';
   import { markerColors } from '../workspace/colors';
@@ -52,7 +56,7 @@
     ondrop,
     onmovekey,
   }: {
-    item: Item;
+    item: Item | PendingNote;
     commandLabel: string;
     selected: boolean;
     primary: boolean;
@@ -100,7 +104,8 @@
   let lineCenter = $state<number>();
   let multiline = $state(false);
   let markerBottom = $state(0);
-  let updated = $derived(timestampPresentation(item.updatedAt));
+  let saved = $derived('pending' in item ? null : item);
+  let kind = $derived(saved?.kind ?? 'note');
   export function toggleExpanded() {
     return body?.toggleExpanded() ?? false;
   }
@@ -112,130 +117,144 @@
 <!-- Selection and actions are separate from rendered content and links. -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <article
-  aria-label={item.kind === 'tree' ? `Tree ${itemLabel(item)}` : 'Saved note'}
-  class:selected
+  aria-hidden={saved ? undefined : true}
+  aria-label={saved?.kind === 'tree'
+    ? `Tree ${itemLabel(saved)}`
+    : saved
+      ? 'Saved note'
+      : undefined}
+  class:selected={saved && selected}
   class="note-card"
+  class:pending-capture={!saved}
   class:editing
   class:drop-before={dropEdge === 'before'}
   class:drop-after={dropEdge === 'after'}
-  {ondragover}
-  {ondragleave}
-  {ondrop}
-  class:done={item.done}
-  data-note-id={item.id}
-  style:--selection-color={item.color ? markerColors[item.color] : undefined}
+  ondragover={saved ? ondragover : undefined}
+  ondragleave={saved ? ondragleave : undefined}
+  ondrop={saved ? ondrop : undefined}
+  class:done={saved?.done}
+  data-note-id={saved?.id}
+  style:--selection-color={saved?.color ? markerColors[saved.color] : undefined}
   style:--item-line-center={lineCenter === undefined
     ? undefined
     : `${lineCenter}px`}
-  data-kind={item.kind}
-  data-colored={!!item.color}
-  data-entry-id={item.id}
-  onclick={onselect}
-  onpointerdown={onselectionpointer}
-  ondblclick={ondoubleclick}
+  data-kind={kind}
+  data-colored={!!saved?.color}
+  data-entry-id={saved?.id}
+  data-pending-capture={saved ? undefined : item.id}
+  onclick={saved ? onselect : undefined}
+  onpointerdown={saved ? onselectionpointer : undefined}
+  ondblclick={saved ? ondoubleclick : undefined}
 >
-  {#if item.color}<span
+  {#if saved?.color}<span
       class="note-color"
       class:multiline
       style:--item-color-bottom={`${markerBottom}px`}
       aria-hidden="true"
     ></span>{/if}
-  <div class="item-slot">
-    <button
-      class="note-select"
-      aria-pressed={selected}
-      disabled={selectionDisabled}
-      onclick={onselectbutton}
-      aria-label={item.kind === 'tree' ? 'Select tree' : 'Select note'}
-      title={item.kind === 'tree' ? 'Select tree' : 'Select note'}
-    >
-      {#if item.kind === 'tree'}<TreeIcon />{/if}
-    </button>
-    {#if reorderable}<button
-        class="drag-handle"
-        draggable={!dragDisabled}
-        disabled={reorderDisabled}
-        aria-label="Reorder note"
-        title={reorderDisabled
-          ? undefined
-          : dragDisabled
-            ? `${commandLabel} Up/Down to reorder`
-            : `Drag to reorder · ${commandLabel} Up/Down`}
-        onclick={onhandleselect}
-        {ondragstart}
-        {ondragend}
-        onkeydown={onmovekey}
+  {#if saved}<div class="item-slot">
+      <button
+        class="note-select"
+        aria-pressed={selected}
+        disabled={selectionDisabled}
+        onclick={onselectbutton}
+        aria-label={kind === 'tree' ? 'Select tree' : 'Select note'}
+        title={kind === 'tree' ? 'Select tree' : 'Select note'}
       >
-        <span aria-hidden="true">
-          <svg class="drag-icon">
-            <svg
-              class="grip-drawing"
-              viewBox="0 0 16 16"
-              width="100%"
-              height="100%"
-              x={item.color ? 1 : 0}
-            >
-              <path d="M5 3h.01M11 3h.01M5 8h.01M11 8h.01M5 13h.01M11 13h.01" />
+        {#if kind === 'tree'}<TreeIcon />{/if}
+      </button>
+      {#if reorderable}<button
+          class="drag-handle"
+          draggable={!dragDisabled}
+          disabled={reorderDisabled}
+          aria-label="Reorder note"
+          title={reorderDisabled
+            ? undefined
+            : dragDisabled
+              ? `${commandLabel} Up/Down to reorder`
+              : `Drag to reorder · ${commandLabel} Up/Down`}
+          onclick={onhandleselect}
+          {ondragstart}
+          {ondragend}
+          onkeydown={onmovekey}
+        >
+          <span aria-hidden="true">
+            <svg class="drag-icon">
+              <svg
+                class="grip-drawing"
+                viewBox="0 0 16 16"
+                width="100%"
+                height="100%"
+                x={saved.color ? 1 : 0}
+              >
+                <path
+                  d="M5 3h.01M11 3h.01M5 8h.01M11 8h.01M5 13h.01M11 13h.01"
+                />
+              </svg>
             </svg>
-          </svg>
-        </span>
-      </button>{/if}
-  </div>
-  {#if item.done}<span class="sr-only">Done</span>{/if}
+          </span>
+        </button>{/if}
+    </div>{/if}
+  {#if saved?.done}<span class="sr-only">Done</span>{/if}
   <div class="note-meta">
-    <time datetime={updated.datetime}>{updated.label}</time>
-    {#if primary && !editing}<div class="card-actions">
-        {#if !editing}<button
+    {#if saved}
+      {@const updated = timestampPresentation(saved.updatedAt)}
+      <time datetime={updated.datetime}>{updated.label}</time>
+      {#if primary && !editing}<div class="card-actions">
+          {#if !editing}<button
+              {disabled}
+              onclick={onedit}
+              aria-label={kind === 'tree' ? 'Edit tree' : 'Edit note'}
+              title={kind === 'tree' ? 'Edit tree' : 'Edit note'}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true"
+                ><path d="m3 10 7-7 3 3-7 7-4 1zM9 4l3 3" /></svg
+              >
+            </button>{/if}
+          <button
             {disabled}
-            onclick={onedit}
-            aria-label={item.kind === 'tree' ? 'Edit tree' : 'Edit note'}
-            title={item.kind === 'tree' ? 'Edit tree' : 'Edit note'}
+            onclick={() => ondone()}
+            aria-label="Mark done"
+            title={saved.done ? 'Mark not done (X)' : 'Mark done (X)'}
+            aria-pressed={saved.done}
+            ><svg viewBox="0 0 16 16" aria-hidden="true"
+              ><path d="M3 3h10v10H3z" />{#if saved.done}<path
+                  d="m5 8 2 2 4-4"
+                />{/if}</svg
+            ></button
+          >
+          <button
+            {disabled}
+            onclick={oncopy}
+            aria-label="Copy Markdown"
+            title="Copy Markdown"
+          >
+            {@html copyIcon}
+          </button>
+          <button
+            {disabled}
+            onclick={ondelete}
+            aria-label={permanent
+              ? kind === 'tree'
+                ? 'Permanently delete tree'
+                : 'Permanently delete note'
+              : kind === 'tree'
+                ? 'Delete tree'
+                : 'Delete note'}
+            title={permanent
+              ? 'Permanently delete this note and its children'
+              : kind === 'tree'
+                ? 'Delete tree'
+                : 'Delete note'}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true"
-              ><path d="m3 10 7-7 3 3-7 7-4 1zM9 4l3 3" /></svg
+              ><path d="M3 4h10M6 4V2h4v2M4 4l1 10h6l1-10M7 6v6M9 6v6" /></svg
             >
-          </button>{/if}
-        <button
-          {disabled}
-          onclick={() => ondone()}
-          aria-label="Mark done"
-          title={item.done ? 'Mark not done (X)' : 'Mark done (X)'}
-          aria-pressed={item.done}
-          ><svg viewBox="0 0 16 16" aria-hidden="true"
-            ><path d="M3 3h10v10H3z" />{#if item.done}<path
-                d="m5 8 2 2 4-4"
-              />{/if}</svg
-          ></button
-        >
-        <button
-          {disabled}
-          onclick={oncopy}
-          aria-label="Copy Markdown"
-          title="Copy Markdown"
-        >
-          {@html copyIcon}
-        </button>
-        <button
-          {disabled}
-          onclick={ondelete}
-          aria-label={permanent
-            ? item.kind === 'tree'
-              ? 'Permanently delete tree'
-              : 'Permanently delete note'
-            : item.kind === 'tree'
-              ? 'Delete tree'
-              : 'Delete note'}
-          title={permanent
-            ? 'Permanently delete this note and its children'
-            : item.kind === 'tree'
-              ? 'Delete tree'
-              : 'Delete note'}
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true"
-            ><path d="M3 4h10M6 4V2h4v2M4 4l1 10h6l1-10M7 6v6M9 6v6" /></svg
-          >
-        </button>
-      </div>{/if}
+          </button>
+        </div>{/if}
+    {:else}
+      <span>Saving note…</span>
+    {/if}
   </div>
   {#if location}<p class="note-location">{location}</p>{/if}
   {#if outsideSearch}<p class="editing-outside">
@@ -244,7 +263,7 @@
   <NoteBody
     bind:this={body}
     onfirstline={(center) => (lineCenter = center)}
-    onmarkerlayout={item.color
+    onmarkerlayout={saved?.color
       ? (value, bottom) => {
           multiline = value;
           markerBottom = bottom;
@@ -256,6 +275,7 @@
     markdown={item.markdown}
     {source}
     {editing}
+    pending={!saved}
     {baseline}
     {states}
     {readOnly}

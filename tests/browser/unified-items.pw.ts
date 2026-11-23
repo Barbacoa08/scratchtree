@@ -292,20 +292,24 @@ test('capture previews the submitted source while an older write holds the queue
     )
     .toBe(1);
   await capture(page).press('Enter');
-  const pending = page.locator('.pending-capture');
+  const pending = stream(page).locator('.pending-capture');
   await expect(pending).toBeVisible();
-  await expect(pending).toContainText('first **source**');
+  await expect(pending.locator('strong')).toHaveText('source');
+  await expect(stream(page).getByRole('article')).toHaveCount(1);
   await expect(page.getByRole('status')).toHaveText(
     'Saving note… Submit again when this save finishes.',
   );
   await expect(capture(page)).toBeFocused();
   await expect(capture(page)).toHaveText('first **source**');
-  await expect(stream(page).locator('.note-card')).toHaveCount(1);
-  await expect(pending.locator('button, a, [tabindex]')).toHaveCount(0);
+  await expect(stream(page).locator('[data-entry-id]')).toHaveCount(1);
+  await expect(stream(page).locator(':scope > :last-child')).toHaveClass(
+    /pending-capture/,
+  );
+  expect(await stream(page).evaluate((node) => node.scrollTop)).toBe(0);
 
   await capture(page).press('Enter');
   await capture(page).fill('newer draft');
-  await expect(pending).toContainText('first **source**');
+  await expect(pending).toContainText('first source');
   await expect(page.locator('.composer .hint')).toContainText(
     'Submit again when this save finishes',
   );
@@ -328,14 +332,95 @@ test('capture previews the submitted source while an older write holds the queue
   expect(saved).toEqual(['existing', 'first **source**']);
 });
 
-test('capture acknowledgment selects its own note when another capture commits first', async ({
+test('capture reveals only the clipped part of the pending slot and keeps composer focus', async ({
   page,
 }) => {
-  await seed(page, ['existing']);
+  await page.setViewportSize({ width: 1120, height: 620 });
+  const ids = await seed(
+    page,
+    Array.from({ length: 32 }, (_, i) => `Existing note ${i + 1}`),
+  );
+  const notes = stream(page);
+  const last = notes.locator(`[data-entry-id="${ids.at(-1)}"]`);
+  await last.evaluate((node) => node.scrollIntoView({ block: 'end' }));
+  await page.evaluate(() => (window as any).__test.delay());
+  await capture(page).fill('**Saved here**');
+  const before = await notes.evaluate((node) => node.scrollTop);
+  await capture(page).press('Enter');
+  const pending = notes.locator('.pending-capture');
+  await expect(pending).toBeVisible();
+  await expect(capture(page)).toBeFocused();
+  const slot = await pending.elementHandle();
+  const captureId = await pending.getAttribute('data-pending-capture');
+  const position = await pending.evaluate((node) => {
+    const stream = node.parentElement!;
+    const card = node.getBoundingClientRect();
+    const bottom =
+      stream.getBoundingClientRect().top +
+      stream.clientTop +
+      stream.clientHeight;
+    return {
+      scroll: stream.scrollTop,
+      gap: bottom - card.bottom,
+      height: card.height,
+      previous: node.previousElementSibling?.getAttribute('data-entry-id'),
+    };
+  });
+  expect(position.previous).toBe(ids.at(-1));
+  expect(position.scroll).toBeGreaterThan(before);
+  expect(position.scroll - before).toBeLessThan(position.height + 10);
+  expect(position.gap).toBeGreaterThanOrEqual(-1);
+  expect(position.gap).toBeLessThan(4);
+
+  await page.evaluate(() => (window as any).__test.release());
+  await expect(notes.locator('[data-entry-id].selected')).toContainText(
+    'Saved here',
+  );
+  expect(captureId).toBeTruthy();
+  expect(await slot!.getAttribute('data-entry-id')).toBe(captureId);
+  expect(await notes.evaluate((node) => node.scrollTop)).toBe(position.scroll);
+  await expect(capture(page)).toBeFocused();
+});
+
+test('acknowledgment respects a newer scroll in the note stream', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1120, height: 620 });
+  await seed(
+    page,
+    Array.from({ length: 32 }, (_, i) => `Note ${i + 1}`),
+  );
+  await page.evaluate(() => (window as any).__test.delay());
+  await capture(page).fill('Save offscreen');
+  await capture(page).press('Enter');
+  const notes = stream(page);
+  await expect(notes.locator('.pending-capture')).toBeVisible();
+  expect(await notes.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await notes.evaluate((node) => (node.scrollTop = 0));
+  await page.evaluate(() => (window as any).__test.release());
+  await expect(notes.locator('[data-entry-id].selected')).toContainText(
+    'Save offscreen',
+  );
+  expect(await notes.evaluate((node) => node.scrollTop)).toBe(0);
+  await expect(capture(page)).toBeFocused();
+});
+
+test('capture acknowledgment keeps its own note visible when another capture commits first', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1120, height: 620 });
+  await seed(
+    page,
+    Array.from({ length: 32 }, (_, i) => `Note ${i + 1}`),
+  );
   await page.evaluate(() => {
     const t = (window as any).__test;
     const capture = t.repo.captureItem.bind(t.repo);
+    const gate = new Promise<void>((resolve) => {
+      t.releaseConcurrentCapture = resolve;
+    });
     t.repo.captureItem = async (request: CaptureItem) => {
+      await gate;
       await capture({
         ...request,
         id: crypto.randomUUID(),
@@ -347,9 +432,15 @@ test('capture acknowledgment selects its own note when another capture commits f
   });
   await capture(page).fill('my note');
   await capture(page).press('Enter');
-  await expect(stream(page).locator('.note-card.selected')).toContainText(
-    'my note',
-  );
+  const notes = stream(page);
+  await expect(notes.locator('.pending-capture')).toBeInViewport({
+    ratio: 0.99,
+  });
+  await page.evaluate(() => (window as any).__test.releaseConcurrentCapture());
+  const saved = notes.locator('[data-entry-id].selected');
+  await expect(saved).toContainText('my note');
+  await expect(saved).toBeInViewport({ ratio: 0.99 });
+  await expect(capture(page)).toBeFocused();
 });
 
 test('a pending Root capture preserves the destination selection of an older navigation', async ({

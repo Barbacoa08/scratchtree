@@ -14,6 +14,7 @@
     markdown,
     source,
     editing,
+    pending,
     baseline,
     readOnly,
     states,
@@ -38,6 +39,7 @@
     markdown: string;
     source: string;
     editing: boolean;
+    pending: boolean;
     baseline?: number;
     readOnly: boolean;
     states: Map<string, EditorState>;
@@ -241,6 +243,7 @@
   class:body-editing={editing}
   class:expanded
   class:preview-collapsed={!editing && overflow && !expanded}
+  inert={pending}
   style:--preview-line={`${firstLineHeight}px`}
   style:--preview-offset={`${firstLineOffset}px`}
   bind:this={body}
@@ -286,7 +289,7 @@
     class="note-expand"
     aria-label={expanded ? 'Collapse note' : 'Expand note'}
     aria-expanded={expanded}
-    disabled={readOnly}
+    disabled={readOnly || pending}
     onmousedown={(event) => event.preventDefault()}
     onclick={toggleExpanded}
     >{expanded ? 'Collapse' : 'Expand'}<span
