@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import type { CaptureItem } from '../../src/lib/platform/workspace';
 const capture = (p: Page) =>
   p.getByRole('textbox', { name: 'New note Markdown' });
 const stream = (p: Page) => p.getByRole('region', { name: 'Note stream' });
@@ -274,6 +275,141 @@ test('Capture Up falls back to displayed note rank and preserves a valid highlig
   await expect(page.getByRole('searchbox')).toHaveValue('match');
   await expect(capture(page)).toHaveText('retained draft');
 });
+test('capture previews the submitted source while an older write holds the queue', async ({
+  page,
+}) => {
+  await seed(page, ['existing']);
+  await capture(page).fill('first **source**');
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    t.delayCheckpoint();
+    t.delay();
+    void t.controller.flush();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__test.repo.checkpointCalls),
+    )
+    .toBe(1);
+  await capture(page).press('Enter');
+  const pending = page.locator('.pending-capture');
+  await expect(pending).toBeVisible();
+  await expect(pending).toContainText('first **source**');
+  await expect(page.getByRole('status')).toHaveText(
+    'Saving note… Submit again when this save finishes.',
+  );
+  await expect(capture(page)).toBeFocused();
+  await expect(capture(page)).toHaveText('first **source**');
+  await expect(stream(page).locator('.note-card')).toHaveCount(1);
+  await expect(pending.locator('button, a, [tabindex]')).toHaveCount(0);
+
+  await capture(page).press('Enter');
+  await capture(page).fill('newer draft');
+  await expect(pending).toContainText('first **source**');
+  await expect(page.locator('.composer .hint')).toContainText(
+    'Submit again when this save finishes',
+  );
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    t.releaseCheckpoint();
+    t.release();
+  });
+  await expect(pending).toHaveCount(0);
+  await expect(stream(page).locator('.note-card.selected')).toContainText(
+    'first source',
+  );
+  await expect(capture(page)).toHaveText('newer draft');
+  await expect(capture(page)).toBeFocused();
+  const saved = await page.evaluate(() =>
+    (window as any).__test.repo.snapshot.items.map(
+      (item: any) => item.markdown,
+    ),
+  );
+  expect(saved).toEqual(['existing', 'first **source**']);
+});
+
+test('capture acknowledgment selects its own note when another capture commits first', async ({
+  page,
+}) => {
+  await seed(page, ['existing']);
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    const capture = t.repo.captureItem.bind(t.repo);
+    t.repo.captureItem = async (request: CaptureItem) => {
+      await capture({
+        ...request,
+        id: crypto.randomUUID(),
+        markdown: 'concurrent note',
+        draft: { key: 'compose', revision: 0 },
+      });
+      return capture(request);
+    };
+  });
+  await capture(page).fill('my note');
+  await capture(page).press('Enter');
+  await expect(stream(page).locator('.note-card.selected')).toContainText(
+    'my note',
+  );
+});
+
+test('a pending Root capture preserves the destination selection of an older navigation', async ({
+  page,
+}) => {
+  const [tree] = await seed(page, ['Destination']);
+  await page.evaluate(async (tree) => {
+    const t = (window as any).__test;
+    await t.repo.captureItem({
+      id: crypto.randomUUID(),
+      location: { scope: 'live', itemId: tree },
+      markdown: 'destination child',
+      draft: { key: `compose:${tree}`, revision: 0 },
+    });
+    await t.controller.start();
+    t.delayCheckpoint();
+  }, tree);
+  await capture(page).fill('captured in Root');
+  await page.getByRole('button', { name: 'Open tree Destination' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).__test.repo.checkpointCalls),
+    )
+    .toBe(1);
+  await capture(page).press('Enter');
+  await expect(page.locator('.pending-capture')).toBeVisible();
+  await page.evaluate(() => (window as any).__test.releaseCheckpoint());
+  await expect(stream(page).locator('.note-card.selected')).toContainText(
+    'destination child',
+  );
+  await expect(page.locator('.pending-capture')).toHaveCount(0);
+  const saved = await page.evaluate(() =>
+    (window as any).__test.repo.snapshot.items.find(
+      (item: any) => item.markdown === 'captured in Root',
+    ),
+  );
+  expect(saved).toMatchObject({ parentId: null, deletedAt: null });
+});
+
+test('an empty newer draft retains undo history after the first capture saves', async ({
+  page,
+}) => {
+  await seed(page, []);
+  await page.evaluate(() => (window as any).__test.delay());
+  await capture(page).fill('captured source');
+  await capture(page).press('Enter');
+  await expect(page.locator('.pending-capture')).toBeVisible();
+  await capture(page).fill('newer source');
+  await capture(page).press('Meta+a');
+  await capture(page).press('Backspace');
+  await expect(capture(page)).toHaveText('');
+  await page.evaluate(() => (window as any).__test.release());
+  await expect(page.locator('.pending-capture')).toHaveCount(0);
+  await expect(stream(page).locator('.note-card')).toContainText(
+    'captured source',
+  );
+  await capture(page).press('Meta+z');
+  await expect(capture(page)).toHaveText('newer source');
+});
+
 for (const later of ['later source', 'original source'])
   test(`lost capture acknowledgment reconciles original ID while retaining newer editor source/revision: ${later}`, async ({
     page,
