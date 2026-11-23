@@ -193,6 +193,28 @@ Verify the package’s SHA-256 against its CI manifest and inspect the package m
 
 Describe Arch as an experimental signed-out Preview tested on virtual X11 with Arch WebKitGTK. The initial Preview defers native backup-dialog acceptance. Report the status of that check, Wayland, upgrades, and sync in the release notes. See the [Arch Preview guide](ARCH-PREVIEW.md) for installation and test scope.
 
+### Stage a signed Arch repository snapshot
+
+Use the reviewed Arch Preview package and its verified SHA-256 from CI. Use an Arch environment with GnuPG, libarchive, pacman tools, and a dedicated signing keyring. Use a separate disposable key when testing.
+
+For the first authorized release, provision the signing key on the signing machine. [GnuPG key management](https://gnupg.org/documentation/manuals/gnupg/OpenPGP-Key-Management.html)
+
+1. Create a separate GnuPG home with mode 0700. In that keyring, run `gpg --full-generate-key` interactively to create a dedicated signing key, and set its passphrase through the local prompt.
+2. Record the full primary fingerprint from `gpg --fingerprint`. Export only that public certificate with `gpg --armor --export "$release_arch_fingerprint" > scratchtree-arch.asc`. Check that the export contains one key with the matching fingerprint.
+3. Keep a secure offline backup of the signing key and its revocation certificate from `openpgp-revocs.d`. Keep release private keys and passphrases outside Git, release artifacts, and CI.
+
+From the repository root, set `release_arch_keyring` to the absolute path of the authorized keyring. Set `release_arch_package` to the approved package path, `release_arch_sha256` to its manifest digest, and `release_arch_fingerprint` to the chosen key's full fingerprint. Use a new snapshot directory within the existing private release folder.
+
+```sh
+GNUPGHOME="$release_arch_keyring" bash packaging/arch/stage-signed-repo.sh \
+  "$release_arch_package" "$release_arch_sha256" "$release_arch_fingerprint" \
+  "$release_dir/arch-repository"
+```
+
+The helper checks the copied package's checksum, name, version, and architecture before signing. It verifies the detached package signature and both repository index signatures before making the completed snapshot available locally. Keep the exact package and its `.sig`, `scratchtree.db` and `scratchtree.db.sig`, and `scratchtree.files` and `scratchtree.files.sig` together. [Arch repository signing](https://man.archlinux.org/man/repo-add.8.en)
+
+Before publishing, verify the same signed install and upgrade in a clean Arch environment, using the intended public key and configuration. A public deployment needs separate authorization. Publish immutable package files and signatures before making the new indexes available. Deploy each index with its matching signature in the same snapshot, retain packages referenced by the previous index during the transition, and verify installation from the live HTTPS URL. Publish the single public key and its full fingerprint through the official Scratchtree installation instructions. During planned rotation, announce the replacement fingerprint, verify that users can install from the newly signed snapshot, and then retire the prior key. If a key is compromised, pause publishing, publish its revocation, and tell users to remove it from pacman’s trusted keys. Enable the Arch update feed only after the repository and its trust setup have passed acceptance.
+
 ## Desktop update candidates
 
 Public desktop installation remains manual until an updater-enabled release and its matching feed have passed private acceptance and are authorized for publication. Version 0.2.8 requires a normal installer to reach an updater-enabled build. The updater checks once when a configured native workspace opens. The footer appears only for a newer offer, and the user chooses when to update.
