@@ -8,6 +8,7 @@ on:
       - '.github/workflows/arch-preview.yml'
       - 'packaging/arch/**'
       - 'tests/native/arch-preview.sh'
+      - 'tests/native/arch-signing.sh'
       - 'src-tauri/**'
       - 'src/**'
       - 'static/**'
@@ -62,7 +63,8 @@ jobs:
             --config src-tauri/tauri.preview.conf.json \
             --config src-tauri/tauri.arch-preview.conf.json -- --locked
           mkdir -p "$ARCH_WORK/context" "$ARCH_WORK/evidence" "$ARCH_WORK/package"
-          cp packaging/arch/{Dockerfile,PKGBUILD} tests/native/arch-preview.sh "$ARCH_WORK/context/"
+          cp packaging/arch/{Dockerfile,PKGBUILD,stage-signed-repo.sh} \
+            tests/native/{arch-preview.sh,arch-signing.sh} "$ARCH_WORK/context/"
           debs=(src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb)
           test "${#debs[@]}" -eq 1
           cp "${debs[0]}" "$ARCH_WORK/context/scratchtree-preview.deb"
@@ -96,11 +98,23 @@ jobs:
             test ! -e "/usr/share/applications/Scratchtree Preview.desktop"
           '
 
+      - name: Verify signed pacman install and upgrade offline
+        run: |
+          set -o pipefail
+          sudo podman run --name scratchtree-arch-signing --network none --user root \
+            --tmpfs /proof:rw,noexec,nosuid,nodev,mode=0700 \
+            scratchtree-arch-preview bash /usr/local/bin/arch-signing 2>&1 | \
+            tee "$ARCH_WORK/evidence/signing.log"
+
       - name: Collect smoke evidence
         if: always()
         run: |
           if sudo podman inspect scratchtree-arch-smoke >/dev/null 2>&1; then
             sudo podman cp scratchtree-arch-smoke:/home/smoke/evidence/. "$ARCH_WORK/evidence/"
+          fi
+          if sudo podman inspect scratchtree-arch-signing >/dev/null 2>&1; then
+            mkdir -p "$ARCH_WORK/evidence/signed-upgrade"
+            sudo podman cp scratchtree-arch-signing:/home/smoke/evidence/. "$ARCH_WORK/evidence/signed-upgrade/"
           fi
 
       - name: Collect the verified package

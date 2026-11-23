@@ -53,7 +53,7 @@ To verify the download, save the checksum file beside the DMG and run `shasum -a
 
 [Download Scratchtree v0.2.8 for Arch Linux x86_64](https://github.com/Barbacoa08/scratchtree/releases/download/v0.2.8/scratchtree-preview-0.2.8-1-x86_64.pkg.tar.zst) · [Installation and checksum verification](docs/ARCH-PREVIEW.md). The app uses Ctrl for the Command shortcuts described below. Closing the Linux window saves pending work and exits when the save succeeds.
 
-The native smoke test covers local editing and persistence under virtual X11 with Arch WebKitGTK. Linux Wayland, native backup dialogs, upgrades, and account synchronization remain outside the current test coverage.
+The native smoke test covers local editing and persistence under virtual X11 with Arch WebKitGTK. The signed repository smoke covers a package revision upgrade using the same app binary. Linux Wayland, native backup dialogs, upgrades between different app versions, and account synchronization remain outside the current test coverage.
 
 ## Transfer from alpha.5
 
