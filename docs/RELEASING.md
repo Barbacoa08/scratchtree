@@ -197,7 +197,13 @@ Describe Arch as an experimental signed-out Preview tested on virtual X11 with A
 
 Public desktop installation remains manual until an updater-enabled release and its matching feed have passed private acceptance and are authorized for publication. Version 0.2.8 requires a normal installer to reach an updater-enabled build. The updater checks once when a configured native workspace opens. The footer appears only for a newer offer, and the user chooses when to update.
 
+The screenshots use a browser fixture with synthetic notes and an example offer for version 0.2.9.
+
+![Update available in the left sidebar, with the version and a full-width Update now button above the account controls](media/desktop-update-footer.png)
+
 ### Direct-download Mac updater
+
+![Mac update dialog with the save-before-restart explanation, What’s new, Later, and Update and restart](media/desktop-update-mac.png)
 
 - Set `SCRATCHTREE_MAC_UPDATE_ENDPOINT` and `SCRATCHTREE_MAC_UPDATE_PUBKEY` at build time for the intended release channel. Use an HTTPS endpoint on `scratchtree.barbajoe.tech` or `scratchtree.netlify.app` and the Tauri updater public key as exported by the signer. Keep the corresponding private key and password in approved, backed-up local storage. The Developer ID certificate and Apple notarization remain separate requirements. Leave update inputs unset for ordinary builds without a feed.
 - After acceptance and publication authorization, publish the versioned archive on the GitHub prerelease, verify its unauthenticated download against the accepted archive, and then publish the feed. For updater-disabled releases, keep the existing two-installer workflow. The Tauri manifest includes a numeric build version, optional plain-text `notes`, and a `platforms.darwin-aarch64` entry with an exact versioned GitHub archive URL and the matching signature. The expected filename is `Scratchtree-<version>-aarch64.app.tar.gz` under the corresponding `v<version>` tag. Prepare the archive from the final Developer ID-signed app with its own notarization ticket. Validate the app again after extraction. [Tauri updater guide](https://v2.tauri.app/plugin/updater/) · [Apple notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
@@ -207,6 +213,8 @@ Public desktop installation remains manual until an updater-enabled release and 
 - Test version and signature mismatches, blocked saves, a network interruption, and a protected installation location. Verify relaunch and note, draft, and Undo persistence in the probe. Verify Developer ID, Gatekeeper, Keychain continuity, and retained sign-in and sync separately for the notarized release build in an isolated macOS profile. Keep recovery installers and review backup compatibility before suggesting a downgrade.
 
 ### Arch Preview handoff
+
+![Arch update dialog with the pacman command, Later, and Copy update command](media/desktop-update-arch.png)
 
 Set `SCRATCHTREE_ARCH_UPDATE_ENDPOINT` at build time only when the intended package repository is ready for testing. The HTTPS metadata describes `platform` as `linux-x86_64`, `package` as `scratchtree-preview`, a newer `version`, and optional plain-text `notes`. Scratchtree shows the package-manager action. The user installs through their configured pacman repository. Verify that normal system upgrades retain the package identity and existing notes and drafts. The existing Arch workflow builds with update discovery disabled. The package repository, its trust setup, and the build-time workflow configuration require separate acceptance before enabling this path publicly. [Arch Preview manual installation](ARCH-PREVIEW.md)
 
