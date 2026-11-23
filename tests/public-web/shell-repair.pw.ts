@@ -65,6 +65,7 @@ test('a missing shell has an explicit repair action and preserves local notes', 
   await expect(
     page
       .getByRole('region', { name: 'Note stream' })
+      .getByRole('article', { name: 'Saved note' })
       .getByText(source, { exact: true }),
   ).toBeVisible();
   await discardAppFile(page, true);
@@ -92,6 +93,7 @@ test('a missing shell has an explicit repair action and preserves local notes', 
     await expect(
       page
         .getByRole('region', { name: 'Note stream' })
+        .getByRole('article', { name: 'Saved note' })
         .getByText(source, { exact: true }),
     ).toBeVisible();
     await expect(

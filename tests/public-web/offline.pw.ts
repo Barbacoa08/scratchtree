@@ -36,6 +36,7 @@ test('the published editor reopens offline after a browser restart', async ({
     await expect(
       page
         .getByRole('region', { name: 'Note stream' })
+        .getByRole('article', { name: 'Saved note' })
         .getByText('Offline note', { exact: true }),
     ).toBeVisible();
     await page
@@ -54,6 +55,7 @@ test('the published editor reopens offline after a browser restart', async ({
     await expect(
       page
         .getByRole('region', { name: 'Note stream' })
+        .getByRole('article', { name: 'Saved note' })
         .getByText('Offline note', { exact: true }),
     ).toBeVisible();
     await expect(
@@ -86,7 +88,9 @@ test('ordinary use after preparation makes no app requests to the server', async
   await page.reload();
   await save(page, '![external](https://example.invalid/private.png)');
   await expect(
-    page.getByText('[Image: external]', { exact: true }),
+    page
+      .getByRole('article', { name: 'Saved note' })
+      .getByText('[Image: external]', { exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Export backup' }).click();
   await expect(
@@ -115,6 +119,7 @@ test('an incomplete initial asset cache leaves editing available', async ({
     await expect(
       page
         .getByRole('region', { name: 'Note stream' })
+        .getByRole('article', { name: 'Saved note' })
         .getByText('Keep this local note', { exact: true }),
     ).toBeVisible();
   } finally {
@@ -137,6 +142,7 @@ test('a release is adopted only after an explicit check and apply', async ({
   await expect(
     page
       .getByRole('region', { name: 'Note stream' })
+      .getByRole('article', { name: 'Saved note' })
       .getByText('Survives update', { exact: true }),
   ).toBeVisible();
   try {
@@ -150,6 +156,7 @@ test('a release is adopted only after an explicit check and apply', async ({
     await expect(
       page
         .getByRole('region', { name: 'Note stream' })
+        .getByRole('article', { name: 'Saved note' })
         .getByText('Survives update', { exact: true }),
     ).toBeVisible();
     await request.post('/__test_release/b');
@@ -203,6 +210,7 @@ test('a release is adopted only after an explicit check and apply', async ({
     await expect(
       page
         .getByRole('region', { name: 'Note stream' })
+        .getByRole('article', { name: 'Saved note' })
         .getByText('Survives update', { exact: true }),
     ).toBeVisible();
     await expect(
