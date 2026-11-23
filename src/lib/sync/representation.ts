@@ -16,15 +16,26 @@ export const toSharedItem = (item: Item, epoch: string): SharedItem => {
     placement: { parentId, deletedAt, restoreParentId, restoreIndex },
   };
 };
+export const orderGroupId = (item: Item) =>
+  item.parentId ?? (item.deletedAt === null ? 'root:live' : 'root:trash');
+
 export function orderRows(
   snapshot: WorkspaceSnapshot,
   epoch: string,
+  affectedGroups?: ReadonlySet<string>,
 ): OrderRow[] {
-  const scopes = scopeIndex(snapshot.items),
-    groups = new Map<string, OrderRow>();
+  // Scoped callers read a canonical snapshot, then validate its prospective
+  // hierarchy separately. Only Root needs distinct live and Trash rows.
+  const scopes = affectedGroups ? null : scopeIndex(snapshot.items);
+  const groups = new Map<string, OrderRow>();
+  const positions = new Map<string, number>();
   for (const item of snapshot.items) {
-    const scope = item.parentId === null ? scopes.get(item.id)! : 'live';
-    const id = item.parentId ?? `root:${scope}`;
+    const scope =
+      item.parentId === null
+        ? (scopes?.get(item.id) ?? (item.deletedAt === null ? 'live' : 'trash'))
+        : 'live';
+    const id = orderGroupId(item);
+    if (affectedGroups && !affectedGroups.has(id)) continue;
     const row = groups.get(id) ?? {
       id,
       epoch,
@@ -34,8 +45,8 @@ export function orderRows(
     };
     row.ids.push(item.id);
     groups.set(id, row);
+    positions.set(item.id, item.position);
   }
-  const positions = new Map(snapshot.items.map((x) => [x.id, x.position]));
   return [...groups.values()].map((x) => ({
     ...x,
     ids: x.ids.sort((a, b) => positions.get(a)! - positions.get(b)!),

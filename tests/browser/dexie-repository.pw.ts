@@ -31,6 +31,8 @@ const cases = [
   'invalidations',
   'remote-epoch',
   'aggregate-capacity',
+  'indexed-capture-delete',
+  'indexed-capture-revalidation',
   'field-merge-retry',
   'recovery-collision',
   'captured-outcome-clock',

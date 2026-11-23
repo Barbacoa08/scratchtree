@@ -32,7 +32,9 @@ export interface BackupV8 {
     recovery: RecoveryRecord[];
   };
 }
+type BackupContents = Omit<BackupV8, 'format' | 'version' | 'exportedAt'>;
 const bytes = (value: string) => new TextEncoder().encode(value).length;
+const jsonBytes = (value: unknown) => bytes(JSON.stringify(value));
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 const fields = (value: Record<string, unknown>, keys: string[]) =>
@@ -108,6 +110,10 @@ function decodeCloudBackup(text: string): BackupV8 | AppError {
   } catch {
     return invalid('Backup must be valid JSON.');
   }
+  return validateBackupValue(value);
+}
+
+function validateBackupValue(value: unknown): BackupV8 | AppError {
   if (
     !record(value) ||
     !fields(value, ['format', 'version', 'exportedAt', 'library', 'device']) ||
@@ -156,19 +162,67 @@ function decodeCloudBackup(text: string): BackupV8 | AppError {
   return value as unknown as BackupV8;
 }
 export class LibraryCapacityError extends Error {}
-export function encodeCloudBackup(
-  backup: Omit<BackupV8, 'format' | 'version' | 'exportedAt'>,
-  exportedAt = new Date().toISOString(),
-): string {
-  const text = JSON.stringify({
-    ...backup,
-    format: 'scratchtree',
-    version: 8,
-    exportedAt,
-  });
-  if (bytes(text) > MAX_ENVELOPE)
+const envelope = (backup: BackupContents, exportedAt: string): BackupV8 => ({
+  ...backup,
+  format: 'scratchtree',
+  version: 8,
+  exportedAt,
+});
+
+function checkCapacity(byteLength: number) {
+  if (byteLength > MAX_ENVELOPE)
     throw new LibraryCapacityError('Backup exceeds the 10 MiB capacity.');
+}
+
+export function serializeCloudBackup(
+  backup: BackupContents,
+  exportedAt = new Date().toISOString(),
+) {
+  const text = JSON.stringify(envelope(backup, exportedAt));
+  const byteLength = bytes(text);
+  checkCapacity(byteLength);
   const checked = decodeCloudBackup(text);
   if ('code' in checked) throw new Error(checked.message);
-  return text;
+  return { text, byteLength };
+}
+
+export function encodeCloudBackup(backup: BackupContents, exportedAt?: string) {
+  return serializeCloudBackup(backup, exportedAt).text;
+}
+
+/** The byte count must come from a freshly validated baseline. Compare the
+ * envelope without its items, then account for each changed item and comma. */
+export function validateIndexedBackup(
+  before: BackupContents,
+  beforeBytes: number,
+  after: BackupContents,
+  changes: readonly { before?: Item; after?: Item }[],
+) {
+  const commas = (items: Item[]) => Math.max(0, items.length - 1);
+  // Valid export timestamps have a fixed serialized length.
+  const exportedAt = new Date().toISOString();
+  const withoutItems = (backup: BackupContents) =>
+    jsonBytes(
+      envelope(
+        {
+          ...backup,
+          library: { ...backup.library, items: [] },
+        },
+        exportedAt,
+      ),
+    );
+  let total =
+    beforeBytes +
+    commas(after.library.items) -
+    commas(before.library.items) +
+    withoutItems(after) -
+    withoutItems(before);
+  for (const change of changes) {
+    if (change.before) total -= jsonBytes(change.before);
+    if (change.after) total += jsonBytes(change.after);
+  }
+  checkCapacity(total);
+  const checked = validateBackupValue(envelope(after, exportedAt));
+  if ('code' in checked) throw new Error(checked.message);
+  return total;
 }
