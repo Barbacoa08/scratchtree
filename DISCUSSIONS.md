@@ -72,6 +72,8 @@ Mac comes first. Future iOS and Android companions are intended primarily for vi
 
 **Accepted.** Show **Update available** near the bottom of the left panel, above the account action, with the offered version and a full-width button. A configured desktop build checks when the workspace opens. Installation requires an explicit choice and a successful save. Direct-download Mac builds use a signed updater archive and preserve the DMG as a manual and recovery path. Arch Preview hands off to pacman and keeps the manual package download. Public feeds depend on private packaged acceptance. The Arch repository and its signing setup have a separate public rollout. The browser editor's existing **Check for updates** action has its own [deployment workflow](docs/RELEASING.md#web-editor-deployment).
 
+The first updater-enabled Mac release is 0.3.2. Install its notarized DMG once to receive future offers. The initial feed points to 0.3.2, and the first live in-app upgrade remains to be verified when a newer release is published to the feed. [Release guide](docs/RELEASING.md#desktop-update-candidates)
+
 ## Arch package signatures
 
 **Accepted.** Use a dedicated OpenPGP key and a pacman repository with signed packages and indexes. Provide a one-time fingerprint check and repository setup. Keep release signing private keys outside Git, CI, and release assets. Prove trusted installation, rejection paths, and saved notes and drafts across a package upgrade with disposable keys and profiles. Public repository hosting, the release signing key, and enabling the Arch update feed follow separate acceptance and authorization. [Arch setup](docs/ARCH-PREVIEW.md#signed-repository-setup) · [Signing workflow](docs/RELEASING.md#stage-a-signed-arch-repository-snapshot)

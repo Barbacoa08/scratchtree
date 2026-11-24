@@ -39,26 +39,28 @@ Use **Export backup**, then **Download backup**, to keep a separate BackupV8 fil
 
 **Scratchtree alpha:** the application has its own name, native identity, note-tree terminology, and backup format. The Mac app keeps running when its window closes and returns through Command+Tab or the Dock.
 
-**Alpha compatibility:** version 0.3.1 uses persistent Dexie IndexedDB, BackupV8, and the release identity introduced in 0.2.0. Updating from 0.2.0 through 0.3.0 retains that identity and format. The release uses a separate local profile from earlier alphas and never automatically reads an older store. Before updating from the local-only alpha.5, export and retain its unchanged BackupV7, convert a copy with the separate local transfer tool, and verify the import and a fresh export. Signing in does not transfer those old local notes. Keep the original backup and [previous installer](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.1.0-alpha.5) until the transfer is verified. Breaking changes are expected during alpha.
+**Alpha compatibility:** version 0.3.2 uses persistent Dexie IndexedDB, BackupV8, and the release identity introduced in 0.2.0. Updating from 0.2.0 through 0.3.1 retains that identity and format. The release uses a separate local profile from earlier alphas and never automatically reads an older store. Before updating from the local-only alpha.5, export and retain its unchanged BackupV7, convert a copy with the separate local transfer tool, and verify the import and a fresh export. Signing in does not transfer those old local notes. Keep the original backup and [previous installer](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.1.0-alpha.5) until the transfer is verified. Breaking changes are expected during alpha.
 
-[Download Scratchtree v0.3.1 for Apple Silicon](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.1/Scratchtree_0.3.1_aarch64.dmg) · [SHA-256 checksum](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.1/SHA256SUMS.txt) · [Release notes](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.3.1)
+[Download Scratchtree v0.3.2 for Apple Silicon](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.2/Scratchtree_0.3.2_aarch64.dmg) · [SHA-256 checksum](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.2/SHA256SUMS.txt) · [Release notes](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.3.2)
 
-1. Export a backup before updating, and quit older app copies. The older alpha.5 uses a different backup format: prepare a converted BackupV8 copy before importing it into 0.3.1. See [Transfer from alpha.5](#transfer-from-alpha5) below.
+1. Export a backup before updating, and quit older app copies. The older alpha.5 uses a different backup format: prepare a converted BackupV8 copy before importing it into 0.3.2. See [Transfer from alpha.5](#transfer-from-alpha5) below.
 2. Open the downloaded DMG, drag Scratchtree to Applications, and replace the existing app if prompted. Your app data is stored separately from the app.
 3. Open Scratchtree from Applications. The linked DMG is Developer ID-signed and notarized. If macOS asks you to confirm that you want to open an app downloaded from the internet, click **Open**.
 
 Save the checksum file beside the DMG and verify the Mac entry in that folder.
 
 ```sh
-dmg='Scratchtree_0.3.1_aarch64.dmg'
+dmg='Scratchtree_0.3.2_aarch64.dmg'
 checksum=$(awk -v dmg="$dmg" '$2 == dmg { print }' SHA256SUMS.txt) &&
   test -n "$checksum" &&
   printf '%s\n' "$checksum" | shasum -a 256 -c -
 ```
 
+Version 0.3.2 is the first Mac release that checks for in-app updates. Install this DMG once if you are on 0.3.1 or earlier. A newer release appears as **Update available** in the sidebar when you open Scratchtree. Both local-only and signed-in users can update.
+
 ### Arch Linux x86_64 Preview
 
-[Download Scratchtree v0.3.1 for Arch Linux x86_64](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.1/scratchtree-preview-0.3.1-1-x86_64.pkg.tar.zst) · [Installation and checksum verification](docs/ARCH-PREVIEW.md). The app uses Ctrl for the Command shortcuts described below. Closing the Linux window saves pending work and exits when the save succeeds.
+[Download Scratchtree v0.3.2 for Arch Linux x86_64](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.2/scratchtree-preview-0.3.2-1-x86_64.pkg.tar.zst) · [Installation and checksum verification](docs/ARCH-PREVIEW.md). The app uses Ctrl for the Command shortcuts described below. Closing the Linux window saves pending work and exits when the save succeeds.
 
 The native smoke test covers local editing and persistence under virtual X11 with Arch WebKitGTK. The signed repository smoke covers a package revision upgrade using the same app binary. Linux Wayland, native backup dialogs, upgrades between different app versions, and account synchronization remain outside the current test coverage.
 
@@ -66,8 +68,8 @@ The native smoke test covers local editing and persistence under virtual X11 wit
 
 The BackupV7 converter is a separate maintainer-assisted tool, not part of the app or a public download. Arrange a private conversion with the maintainer before importing an alpha.5 backup. Do not attach notes or backups to public GitHub issues. Keep using the previous installer until the transfer is arranged.
 
-1. Export a BackupV7 from the old app and retain it unchanged, together with the old installer. Convert a copy to BackupV8 through that private transfer process; do not import BackupV7 directly into 0.3.1.
-2. Open 0.3.1 and sign in to the account that should own the notes. Signing in alone does not transfer the older local library.
+1. Export a BackupV7 from the old app and retain it unchanged, together with the old installer. Convert a copy to BackupV8 through that private transfer process; do not import BackupV7 directly into 0.3.2.
+2. Open 0.3.2 and sign in to the account that should own the notes. Signing in alone does not transfer the older local library.
 3. Choose **Restore backup**, select the converted BackupV8, review the counts, and confirm only when ready. **Restore replaces the current library; while signed in, it replaces the shared library on every Mac.** It does not merge the backup into existing notes.
 4. Wait for **Up to date**, check the notes, and export a fresh BackupV8. Keep the original export and recovery installer until both the transfer and the second-Mac copy are verified. Drafts and Undo import only on this Mac.
 
@@ -180,6 +182,6 @@ Failure tests use isolated IndexedDB, injected public transport interfaces, and 
 
 ## Boundaries
 
-Domain, search, and rendering policy live in `src/lib/domain`; the controller owns keyed buffers and serialized commands in `src/lib/workspace`; `src/lib/sync` owns the current backup, Dexie Repository, confirmation, Session, and detached reconciliation. The typed Repository boundary stays in `src/lib/platform`. Svelte owns view/CodeMirror lifecycles, and Rust retains narrow platform operations. Public sign-up, version history, mobile, and attachments remain future work. Public desktop updates still use manual installers. The [desktop updater](docs/RELEASING.md#desktop-update-candidates) checks for an offer only in configured native builds and requires the user to choose when to install. A local save, a connected socket, and successful authentication each differ from independently confirmed synchronization.
+Domain, search, and rendering policy live in `src/lib/domain`; the controller owns keyed buffers and serialized commands in `src/lib/workspace`; `src/lib/sync` owns the current backup, Dexie Repository, confirmation, Session, and detached reconciliation. The typed Repository boundary stays in `src/lib/platform`. Svelte owns view/CodeMirror lifecycles, and Rust retains narrow platform operations. Public sign-up, version history, mobile, and attachments remain future work. Mac 0.3.2 and later can check for updates in the app. The Arch Linux Preview uses manual packages. The [desktop updater](docs/RELEASING.md#desktop-update-candidates) checks for an offer only in configured native builds and requires the user to choose when to install. A local save, a connected socket, and successful authentication each differ from independently confirmed synchronization.
 
 See [AGENTS.md](AGENTS.md) for repository responsibilities, [CONTRIBUTING.md](CONTRIBUTING.md) for development and review, [DISCUSSIONS.md](DISCUSSIONS.md) for open decisions, [docs/RELEASING.md](docs/RELEASING.md) for packaging and releases, and [.projects/README.md](.projects/README.md) for evidence retention. No public license is selected.

@@ -4,6 +4,8 @@ Build with `pnpm build:site`. This copies the pinned `@barbajoe/css-lib` stylesh
 
 `release.json` owns the Mac and Arch download links, release notes, and observed Mac build environment. Update it when publishing an authorized app release, after verifying the included packages and their platform evidence. The build requires `downloadUrl` and `archDownloadUrl` to point to packages from the same release. The development screenshot is labeled separately from the downloadable release.
 
+`mac-update.json` controls the Mac update offer independently of the download links. The site build publishes it at `/releases/mac.json`. Change it only after verifying that the signed archive and its detached signature are publicly downloadable. The initial feed is 0.3.2, so Scratchtree 0.3.2 will wait for a newer offer.
+
 The favicon and header use unchanged 16px, 32px, and 32px-at-2x PNG representations from the approved native ICNS. The build reads those PNG payloads directly, preserving their size mapping and artwork. Link previews use the 512px representation from the same ICNS, declared as the Open Graph image. See the [branding record](../docs/branding/README.md).
 
 Netlify publishes only `website/dist`. The account-check function and private server settings are outside that directory. Its private `SCRATCHTREE_ALLOWED_EMAILS` list is an eligibility check; Dexie still verifies OTPs and restricts account access. Adding a future account requires updating both that list and Dexie’s registered users. No Dexie management credentials are needed by this endpoint.

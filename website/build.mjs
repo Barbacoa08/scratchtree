@@ -23,12 +23,45 @@ if (
   throw new Error(
     'Review both release assets and the observed Mac environment before building the landing page.',
   );
+const macUpdateSource = await readFile(
+  new URL('mac-update.json', here),
+  'utf8',
+);
+const macUpdate = JSON.parse(macUpdateSource);
+const macTarget = macUpdate?.platforms?.['darwin-aarch64'];
+const macVersion = macUpdate?.version;
+if (
+  Buffer.byteLength(macUpdateSource) > 64 * 1024 ||
+  typeof macVersion !== 'string' ||
+  !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(macVersion) ||
+  Object.keys(macUpdate).some(
+    (key) => !['version', 'notes', 'platforms'].includes(key),
+  ) ||
+  (macUpdate.notes != null &&
+    (typeof macUpdate.notes !== 'string' ||
+      Buffer.byteLength(macUpdate.notes) > 8 * 1024 ||
+      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(
+        macUpdate.notes,
+      ))) ||
+  macTarget?.url !==
+    `${releaseBase}/download/v${macVersion}/Scratchtree-${macVersion}-aarch64.app.tar.gz` ||
+  Object.keys(macUpdate.platforms).length !== 1 ||
+  Object.keys(macTarget).length !== 2 ||
+  typeof macTarget.signature !== 'string' ||
+  !/^[a-zA-Z0-9+/]{1,4096}={0,2}$/.test(macTarget.signature) ||
+  macTarget.signature.length > 4096
+)
+  throw new Error(
+    'Review the macOS update manifest before publishing the site.',
+  );
 let html = await readFile(new URL('index.html', here), 'utf8');
 for (const [key, value] of Object.entries(release))
   html = html.replaceAll(`{{${key}}}`, String(value));
 if (html.includes('{{')) throw new Error('Unresolved landing-page content.');
 await rm(output, { recursive: true, force: true });
 await mkdir(new URL('assets/', output), { recursive: true });
+await mkdir(new URL('releases/', output));
+await writeFile(new URL('releases/mac.json', output), macUpdateSource);
 await writeFile(new URL('index.html', output), html);
 await cp(new URL('site.css', here), new URL('site.css', output));
 await cp(
