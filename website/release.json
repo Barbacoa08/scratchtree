@@ -1,7 +1,7 @@
 {
-  "version": "0.3.1",
-  "downloadUrl": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.1/Scratchtree_0.3.1_aarch64.dmg",
-  "archDownloadUrl": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.1/scratchtree-preview-0.3.1-1-x86_64.pkg.tar.zst",
-  "releaseUrl": "https://github.com/Barbacoa08/scratchtree/releases/tag/v0.3.1",
+  "version": "0.3.2",
+  "downloadUrl": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.2/Scratchtree_0.3.2_aarch64.dmg",
+  "archDownloadUrl": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.2/scratchtree-preview-0.3.2-1-x86_64.pkg.tar.zst",
+  "releaseUrl": "https://github.com/Barbacoa08/scratchtree/releases/tag/v0.3.2",
   "testedOn": "macOS 27.2.1 on Apple Silicon Macs"
 }
