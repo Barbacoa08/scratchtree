@@ -15,3 +15,8 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "no-referrer"
     Content-Security-Policy = "default-src 'self'; style-src 'self'; img-src 'self'; script-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+
+[[headers]]
+  for = "/releases/mac.json"
+  [headers.values]
+    Cache-Control = "no-cache"
