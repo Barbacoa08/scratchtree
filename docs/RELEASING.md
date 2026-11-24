@@ -217,7 +217,7 @@ Before publishing, verify the same signed install and upgrade in a clean Arch en
 
 ## Desktop update candidates
 
-Mac users on 0.3.1 or earlier install the 0.3.2 DMG once to enable update checks. The first 0.3.2 feed points to its own archive, so an installed 0.3.2 does not offer an update until a newer release is advertised. The updater checks once when a configured native workspace opens. The footer appears only for a newer offer, and the user chooses when to update.
+Mac users on 0.3.1 or earlier install the current DMG to enable update checks. Scratchtree 0.3.2 introduced the Mac update channel, and its first feed advertised 0.3.2 itself. The updater checks once when a configured native workspace opens. The footer appears only for a newer offer, and the user chooses when to update.
 
 The screenshots use a browser fixture with synthetic notes and an example offer for version 0.2.9.
 
