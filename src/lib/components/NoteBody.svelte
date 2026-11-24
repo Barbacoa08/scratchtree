@@ -177,18 +177,21 @@
   }
   $effect(() => {
     const node = rendered;
-    if (!node) return;
+    // These boxes often resize together. A single observer measures their
+    // shared geometry once per delivery.
     const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    measure();
+    observer.observe(body);
+    observer.observe(document.documentElement);
+    if (node) observer.observe(node);
     return () => observer.disconnect();
   });
   $effect(() => {
     markdown;
-    source;
-    naturalHeight;
-    changed;
-    editing;
+    if (editing) {
+      source;
+      naturalHeight;
+      changed;
+    }
     measure();
   });
   $effect(() => {
@@ -213,16 +216,12 @@
     return () => observer.disconnect();
   });
   onMount(() => {
-    const observer = new ResizeObserver(measure);
-    observer.observe(body);
-    observer.observe(document.documentElement);
     let disposed = false;
     void document.fonts.ready.then(() => {
       if (!disposed) measure();
     });
     return () => {
       disposed = true;
-      observer.disconnect();
     };
   });
   export function toggleExpanded() {
