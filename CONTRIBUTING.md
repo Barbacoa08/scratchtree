@@ -24,6 +24,8 @@ Update dependencies deliberately, assess the impact, and retain the applicable l
 
 Use synthetic notes and isolated test profiles for development and testing. Keep the maintainer’s installed release, primary account, local data, and synced data out of all test runs. Use fixtures or mocks by default. Authorized real-account tests use only the designated, separately registered plus-address test account in an isolated test profile. Keep account addresses and codes out of the repository, fixtures, and logs.
 
+Use the [synthetic library backups](tests/fixtures/library-backups/README.md) to seed disposable profiles for performance comparisons. The catalog covers four library sizes and separate Markdown-length and sibling-width cases.
+
 ## Native authentication and Keychain evidence
 
 For macOS WebCrypto tests, record the exact application path, bundle identifier, and designated code-signing requirement. Database names and webview data directories do not isolate the application's Keychain master key. Release builds use `tech.barbajoe.scratchtree`, and ordinary Preview builds use `tech.barbajoe.scratchtree.preview`. Disposable probes must not reuse either identity; obtain authorization for a separate test identity first. Do not repair a test by deleting keys or weakening their access controls.
