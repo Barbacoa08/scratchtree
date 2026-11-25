@@ -46,6 +46,6 @@ To test actual release binaries, manually run the Arch Preview workflow with two
 gh workflow run arch-preview.yml -f older_release=0.3.1 -f newer_release=0.3.2
 ```
 
-This verifies the package upgrade and local note and draft retention. Publishing a signed repository still requires separate staging and an install and upgrade check against its HTTPS URL.
+This verifies the package upgrade and local note and draft retention. For each release, test the previous-to-new package pair. The [maintainer release checklist](RELEASING.md#verify-the-released-arch-upgrade) covers when to run this check and how to verify the signed HTTPS repository once it is live.
 
 For broader Arch desktop support beyond this experimental Preview, repeat installation and local use in a full Arch desktop VM using the same package. Check native Wayland and X11 where available, keyboard and pointer use, draft retention, backup file dialogs, and package upgrade with a retained Preview profile. The sign-in controls are present. Real-account sign-in and cross-device synchronization still require acceptance on Linux. The CI smoke covers a virtual X11 session. WebKitGTK may rely on container isolation when nested sandboxing is unavailable.
