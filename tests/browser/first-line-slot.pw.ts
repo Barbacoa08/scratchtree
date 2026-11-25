@@ -120,7 +120,7 @@ test('inline formatting and font scaling keep the shared slot centered on the fi
   await page.locator('.note-card').click();
   await page.keyboard.press('e');
   const editor = page.getByRole('textbox', { name: 'Edit Markdown' });
-  await editor.press('Meta+a');
+  await editor.press('ControlOrMeta+a');
   await page.keyboard.insertText('# Live heading');
   const heading = editor.locator('.cm-heading-1').first();
   await expect(heading).toBeVisible();
@@ -161,7 +161,7 @@ test('returning to the first virtualized edit line refreshes its scaled anchor',
     )
     .toBeGreaterThan(500);
   await page.addStyleTag({ content: ':root { font-size: 24px !important; }' });
-  await editor.press('Meta+Home');
+  await editor.press('ControlOrMeta+Home');
   await expect(editor.locator('.cm-heading-1').first()).toBeVisible();
   await expect
     .poll(() =>
@@ -191,7 +191,7 @@ for (const prefix of ['', '  ']) {
     // E focuses the source end; reveal the first line before comparing its viewport box.
     await page
       .getByRole('textbox', { name: 'Edit Markdown' })
-      .press('Meta+Home');
+      .press('ControlOrMeta+Home');
     await expect
       .poll(() =>
         page.locator('.note-card').evaluate((card) => {
