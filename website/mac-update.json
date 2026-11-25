@@ -1,10 +1,10 @@
 {
-  "version": "0.3.4",
-  "notes": "Refreshes the macOS drag-to-Applications installer with Scratchtree artwork.",
+  "version": "0.3.5",
+  "notes": "Adds session Undo and Redo, move confirmations, and literal sidebar Search.",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.4/Scratchtree-0.3.4-aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaW83ZFZDaDRveFBjaDFNaklWWm5lRWNxS0hKem9MOWxMeHRrUStIRUlCcmovUy82aXRMcktzaG04U1JYS0lTZXVpWVFWV0VKNDQrcVU0dVVQSEhta2tZYTN4NVVvMmdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTc1MjUwCWZpbGU6U2NyYXRjaHRyZWUtMC4zLjQtYWFyY2g2NC5hcHAudGFyLmd6CXZlcnNpb246MC4zLjQKdkVXNlBzbE9GYU41VGZpWlBIMWNNVmJweTJCT0xQZUMxUDRwekZvbFQ2Wm9ONTB1azYzZFUzYXZPU1hsZ2NUY0VKOWtOWG1xT2NxbmJtRmxlVnI2QWc9PQo="
+      "url": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.5/Scratchtree-0.3.5-aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaW83ZFZDaDRveElWaEtBMEV1empEWnd2UEFDMHhlYUxBKzNIcyttRk5qS09TWTFCOE1NKzFYck8va2Q0TFJLM3R3b1NaaWpKTFFWMVVZckx4aHFob0t6WEs4ODVyV0EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjE2NDg2CWZpbGU6U2NyYXRjaHRyZWUtMC4zLjUtYWFyY2g2NC5hcHAudGFyLmd6CXZlcnNpb246MC4zLjUKdUNQalZaZEhycmNnNzdyQ1JCTjIyUkpnbFJ2cEQ3VUxZbDd2czN2SkxEU0lRd1VaT1ZBVXdTSVJHbE1CbGN6UFVEWFd1V1ZXQXlRL2hGdjAzelZjQ0E9PQo="
     }
   }
 }
