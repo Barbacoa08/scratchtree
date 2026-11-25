@@ -35,6 +35,120 @@ async function snapshot(page: Page) {
   );
 }
 
+const moveNotice = (page: Page) =>
+  page.getByRole('region', { name: 'Move confirmation' });
+
+test('an acknowledged move shows its exact destination with Details closed and opens it on request', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 600 });
+  const ids = await seed(page);
+  const stream = page.getByRole('region', { name: 'Note stream' });
+  await expect(
+    page.getByRole('button', { name: 'Show Details' }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    const move = t.repo.moveItems.bind(t.repo);
+    t.repo.moveItems = async (request: any) => {
+      await new Promise<void>((resolve) => {
+        t.releaseMove = resolve;
+      });
+      return move(request);
+    };
+  });
+  await card(page, ids[0]).click();
+  await page.keyboard.press('m');
+  const dialog = page.getByRole('dialog', { name: 'Move notes' });
+  await dialog
+    .getByRole('option', { name: 'destination alpha, Root', exact: true })
+    .click();
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('button', { name: 'Moving…' })).toBeDisabled();
+  await expect(moveNotice(page)).toHaveCount(0);
+  await page.evaluate(() => (window as any).__test.releaseMove());
+  await expect(dialog).toHaveCount(0);
+  await expect(moveNotice(page)).toContainText(
+    'Moved 1 note to Root / destination alpha.',
+  );
+  await expect(stream).toBeFocused();
+  await expect(
+    page.getByRole('heading', { name: 'Root', exact: true }),
+  ).toBeAttached();
+  await page.evaluate(() => {
+    const t = (window as any).__test;
+    const transition = t.repo.transitionLocation.bind(t.repo);
+    t.goRequests = 0;
+    t.repo.transitionLocation = async (request: any) => {
+      if (request.to.itemId !== null) {
+        t.goRequests++;
+        await new Promise<void>((resolve) => {
+          t.releaseGo = resolve;
+        });
+      }
+      return transition(request);
+    };
+  });
+  const go = moveNotice(page).getByRole('button', { name: 'Go to tree' });
+  await go.press('Enter');
+  await expect(go).toHaveAttribute('aria-disabled', 'true');
+  await go.press('Enter');
+  expect(await page.evaluate(() => (window as any).__test.goRequests)).toBe(1);
+  await page.evaluate(() => (window as any).__test.releaseGo());
+  await expect(card(page, ids[0])).toHaveClass(/selected/);
+  await expect(moveNotice(page)).toHaveCount(0);
+  await expect(stream).toBeFocused();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Root', exact: true }),
+  ).toBeAttached();
+});
+
+test('a group toast expires after five active seconds and its destination remains in Details', async ({
+  page,
+}) => {
+  const ids = await seed(page);
+  await page.clock.install();
+  await card(page, ids[0]).click();
+  await card(page, ids[1]).click({ modifiers: ['Meta'] });
+  await page.keyboard.press('m');
+  await page
+    .getByRole('option', { name: 'destination beta, Root', exact: true })
+    .click();
+  await page.keyboard.press('Enter');
+  const toast = moveNotice(page);
+  const copy = 'Moved 2 notes to Root / destination beta.';
+  await expect(toast).toContainText(copy);
+  await page.clock.fastForward(1200);
+  await toast.hover({ position: { x: 2, y: 2 } });
+  await page.clock.fastForward(6000);
+  await expect(toast).toBeVisible();
+  await page.getByRole('region', { name: 'Note stream' }).focus();
+  await page.keyboard.press('m');
+  const dialog = page.getByRole('dialog', { name: 'Move notes' });
+  await expect(dialog).toBeVisible();
+  await expect(toast).toHaveCount(0);
+  await page.clock.fastForward(6000);
+  await page.keyboard.press('Escape');
+  await expect(toast).toBeVisible();
+  const action = toast.getByRole('button', { name: 'Go to tree' });
+  await action.focus();
+  await page.mouse.move(2, 2);
+  await page.clock.fastForward(6000);
+  await expect(toast).toBeVisible();
+  await page.getByRole('searchbox').focus();
+  await page.clock.fastForward(2700);
+  await expect(toast).toBeVisible();
+  await page.clock.fastForward(1100);
+  await expect(toast).toHaveCount(0);
+  await expect(
+    page
+      .getByRole('region', { name: 'Editor status' })
+      .getByText(copy, { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('searchbox')).toBeFocused();
+});
+
 test('live M offers Trash, stages without writing, and cancels neutrally', async ({
   page,
 }) => {
@@ -152,6 +266,7 @@ test('failed modal movement retains the exact destination for Retry and ignores 
   await expect(
     dialog.getByRole('button', { name: 'Retry move', exact: true }),
   ).toBeVisible();
+  await expect(moveNotice(page)).toHaveCount(0);
   await expect(
     dialog.getByRole('option', { name: 'destination beta, Root', exact: true }),
   ).toBeDisabled();
@@ -171,6 +286,9 @@ test('failed modal movement retains the exact destination for Retry and ignores 
   });
   await dialog.getByRole('button', { name: 'Retry move', exact: true }).click();
   await expect(dialog).toHaveCount(0);
+  await expect(moveNotice(page)).toContainText(
+    'Moved 1 note to Root / destination alpha.',
+  );
   await expect
     .poll(
       async () =>
@@ -502,6 +620,60 @@ test('both-area duplicate destinations expose their scoped paths and restoring a
   expect(
     state.items.find((item: any) => item.id === independent).deletedAt,
   ).not.toBeNull();
+});
+
+test('a corner toast keeps the note controls reachable at 150 percent text', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 720 });
+  const ids = await seed(page);
+  await page.addStyleTag({ content: ':root{font-size:24px !important}' });
+  await card(page, ids[0]).click();
+  await page.keyboard.press('m');
+  await page
+    .getByRole('option', { name: 'destination alpha, Root', exact: true })
+    .click();
+  await page.keyboard.press('Enter');
+  const toast = moveNotice(page);
+  await expect(
+    toast.getByRole('button', { name: 'Go to tree' }),
+  ).toBeInViewport();
+  const bounds = (await toast.boundingBox())!;
+  const firstNote = (await card(page, ids[1]).boundingBox())!;
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(firstNote.y);
+});
+
+test('a move into a nested deleted tree confirms the same Trash path shown by the dialog', async ({
+  page,
+}) => {
+  const ids = await seed(page);
+  await page.evaluate(async (ids) => {
+    const { repo, controller } = (window as any).__test;
+    await repo.saveItemSource(ids[3], 'Nested destination', {
+      key: ids[3],
+      revision: 1,
+    });
+    await repo.deleteItem(ids[3]);
+    await repo.deleteItem(ids[1]);
+    await controller.start();
+    await controller.moveItems(
+      controller.captureMove([ids[3]], { scope: 'trash', itemId: ids[1] }, 0),
+    );
+  }, ids);
+  await card(page, ids[0]).click();
+  await page.keyboard.press('m');
+  const dialog = page.getByRole('dialog', { name: 'Move notes' });
+  await dialog
+    .getByRole('option', {
+      name: 'Nested destination, Trash / destination alpha',
+      exact: true,
+    })
+    .click();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toHaveCount(0);
+  await expect(moveNotice(page)).toContainText(
+    'Moved 1 note to Trash / destination alpha / Nested destination.',
+  );
 });
 
 test('cross-area lost acknowledgment retries the exact move without replacing a newer deletion group', async ({

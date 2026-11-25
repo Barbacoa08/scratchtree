@@ -16,7 +16,7 @@ The desktop interface uses locally authored CSS; no desktop styling library is s
 
 ## Cross-parent movement
 
-M uses a staged destination dialog for moving selected siblings together within or between the live library and Trash. A live-to-Trash move is one action in the session Undo and Redo history. Dragging and Command-Up/Down rearrange siblings. Decide whether dragging should also move items between parents, and discuss cross-owner selection separately.
+M uses a staged destination dialog for moving selected siblings together within or between the live library and Trash. An acknowledged move between locations shows the note count and destination in a five-second corner toast with a Go to tree action. Details retains the last move. A live-to-Trash move is one action in the session Undo and Redo history. Dragging and Command-Up/Down rearrange siblings. Decide whether dragging should also move items between parents, and discuss cross-owner selection separately.
 
 ## Keyboard selection and batch actions
 

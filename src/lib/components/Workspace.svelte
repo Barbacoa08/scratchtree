@@ -10,6 +10,7 @@
   import ItemCard, { type PendingNote } from './ItemCard.svelte';
   import ColorPalette from './ColorPalette.svelte';
   import MoveDialog, { type MoveDestination } from './MoveDialog.svelte';
+  import MoveToast from './MoveToast.svelte';
   import { SiblingDrag, siblingDragType } from '../workspace/sibling-drag';
   import { createReorderMotion } from '../workspace/reorder-motion';
   import type { MoveItems } from '../platform/workspace';
@@ -50,7 +51,11 @@
     reorderSelected,
     type MouseSelection,
   } from '../workspace/mouse-selection';
-  import { WorkspaceController, type ViewState } from '../workspace/controller';
+  import {
+    WorkspaceController,
+    type MoveConfirmation,
+    type ViewState,
+  } from '../workspace/controller';
   import type { Repository } from '../platform/workspace';
   import { copyMarkdown, openExternal } from '../platform/actions';
   import { filterNotes } from '../domain/search';
@@ -164,6 +169,8 @@
     request: MoveItems | null;
   };
   let moveSession = $state<MoveSession | null>(null);
+  let moveToast = $state.raw<MoveConfirmation | null>(null);
+  let openingMove = $state(false);
   let moveSequence = 0;
   let paletteSequence = 0;
   let paletteRetry = $state.raw<{
@@ -564,7 +571,7 @@
     exact = false,
     traversing = false,
   ) {
-    if (navigationBlocked) return;
+    if (navigationBlocked) return false;
     if (!traversing) navigation.cancel();
     const request = ++interaction,
       focus = observeSubmissionFocus();
@@ -575,7 +582,7 @@
           ? controller.openLocation({ scope, itemId: id })
           : controller.enterItem(id))
       ) {
-        if (request !== interaction) return;
+        if (request !== interaction) return false;
         // A successful visit to an equal-valued root has no location-change patch.
         if (traversing && navigation.acknowledge(controller.state.location))
           historyRevision++;
@@ -595,9 +602,25 @@
           if (selected) stream?.focus();
           else composer?.focus();
         }
+        return true;
       }
+      return false;
     } finally {
       focus.stop();
+    }
+  }
+  async function openMoveDestination(move: MoveConfirmation) {
+    if (openingMove || moveToast !== move) return;
+    const { itemId, scope } = move.destination;
+    openingMove = true;
+    try {
+      if (
+        (await openTree(itemId, move.firstId, scope, true)) &&
+        moveToast === move
+      )
+        moveToast = null;
+    } finally {
+      openingMove = false;
     }
   }
   async function writeNote() {
@@ -653,6 +676,8 @@
     navigation.reset(previous.location);
     const unsubscribe = controller.subscribe((next) => {
       const replaced = next.cacheGeneration !== previous.cacheGeneration;
+      if (next.moveConfirmation !== previous.moveConfirmation)
+        moveToast = next.moveConfirmation;
       if (replaced) {
         editorStates = new Map();
         editHeights = {};
@@ -1519,7 +1544,15 @@
       session.error = '';
     }
     try {
-      const ok = await controller.moveItems($state.snapshot(request));
+      const destination = session?.destinations.find(
+        ({ location }) =>
+          location.scope === request.to.scope &&
+          location.itemId === request.to.itemId,
+      );
+      const path = destination
+        ? [destination.path, destination.label].filter(Boolean).join(' / ')
+        : undefined;
+      const ok = await controller.moveItems($state.snapshot(request), path);
       if (epoch !== workspaceEpoch) return;
       if (!ok) {
         if (session && moveSession?.session === session.session) {
@@ -2130,6 +2163,8 @@
 
 <svelte:window onkeydown={commands} />
 {#snippet feedback(compact: boolean)}
+  {@const orderUnsaved =
+    keyboardOrder && !viewState.query.trim() && !viewState.keyboardReorderError}
   <section
     class="workspace-feedback"
     class:compact
@@ -2161,12 +2196,15 @@
     <p class:sr-only={compact} role="status" aria-live="polite">
       {#if viewState.pendingCapture}
         Saving note… <span class="sr-only">{pendingCaptureHint}.</span>
-      {:else if keyboardOrder && !viewState.query.trim() && !viewState.keyboardReorderError}
+      {:else if orderUnsaved}
         Order unsaved
       {:else}
-        {viewState.status}
+        {#key viewState.moveConfirmation}{viewState.status}{/key}
       {/if}
     </p>
+    {#if !compact && viewState.moveConfirmation && (viewState.status !== viewState.moveConfirmation.message || viewState.pendingCapture || orderUnsaved)}
+      <p>Last move: {viewState.moveConfirmation.message}</p>
+    {/if}
     <p role="alert">{viewState.keyboardReorderError || viewState.error}</p>
     {#if paletteRetry && viewState.mutationRetry && paletteRetry.epoch === workspaceEpoch && paletteRetry.identity === controller.mutationRetryIdentity}
       <p role="status">
@@ -2436,6 +2474,22 @@
             >{visibleNotes.length}
             {visibleNotes.length === 1 ? 'note' : 'notes'}</span
           >
+          {#if moveToast}
+            {@const move = moveToast}
+            {#key move}
+              <MoveToast
+                {move}
+                hidden={modal || !!palette || webSuspended}
+                canOpen={!openingMove &&
+                  !navigationBlocked &&
+                  validVisit(move.destination)}
+                onopen={() => void openMoveDestination(move)}
+                onexpire={() => {
+                  if (moveToast === move) moveToast = null;
+                }}
+              />
+            {/key}
+          {/if}
         </div>
         <p class="sr-only" aria-live="polite">
           {mouseSelection.ids.length}
