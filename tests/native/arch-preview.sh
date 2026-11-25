@@ -102,7 +102,7 @@ if [[ $phase == after-upgrade ]]; then
   exit
 fi
 
-echo 'Launching the installed desktop entry offline.'
+echo 'Launching the installed desktop entry.'
 launch_app app-first.log
 first_pid=$(xdotool getwindowpid "$window")
 
@@ -160,4 +160,4 @@ launch_app app-reopen.log
 expect_note "$note reopened"
 magick import -window root "$evidence/arch-preview.png"
 close_window "$window"
-echo 'Arch package, offline desktop launch, save, edit, close, and reopen passed.'
+echo 'Arch package, desktop launch, save, edit, close, and reopen passed.'

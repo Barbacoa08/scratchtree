@@ -18,19 +18,27 @@ Launch **Scratchtree Preview** from the application menu or run `scratchtree-pre
 
 ## Signed repository setup
 
-Use this setup when Scratchtree publishes a signed repository and announces its HTTPS URL and full OpenPGP fingerprint. The current public Preview uses the manual package download above.
+Add the signed Scratchtree repository once to receive updates through pacman. The repository uses the same package name as the manual download, so you can add it to an existing installation.
 
-1. Download the Scratchtree public key from the official release instructions. Display its full fingerprint with `gpg --show-keys --with-fingerprint scratchtree-arch.asc` and compare it with the fingerprint in the announcement. Proceed only if the file contains the expected signing key and the full fingerprint matches.
-2. Add the key with `sudo pacman-key --add scratchtree-arch.asc`. Trust the verified key with `sudo pacman-key --lsign-key <full-fingerprint>`, using the fingerprint you just checked. Pacman enrolls it in its shared trust store. [Pacman key management](https://man.archlinux.org/man/pacman-key.8.en)
-3. Add the repository at the end of `/etc/pacman.conf`, substituting the announced server for the example URL. Keep the system-wide signature settings intact. [Pacman repository configuration](https://man.archlinux.org/man/pacman.conf.5.en)
+1. Download the [Scratchtree public key](https://scratchtree-arch.netlify.app/scratchtree-arch.asc) as `scratchtree-arch.asc`. Run `gpg --show-keys --fingerprint scratchtree-arch.asc` and check that it shows one key with the full fingerprint `85B619358B7EFAA0A056EDD32F22C381A2134675`.
+2. Add the verified key and sign it locally in pacman's keyring. [Pacman key management](https://man.archlinux.org/man/pacman-key.8.en)
 
-```ini
-[scratchtree]
-SigLevel = Required TrustedOnly
-Server = https://scratchtree.example.invalid/arch/$arch
-```
+   ```sh
+   sudo pacman-key --add scratchtree-arch.asc
+   sudo pacman-key --lsign-key 85B619358B7EFAA0A056EDD32F22C381A2134675
+   ```
 
-Install with `sudo pacman -Syu scratchtree/scratchtree-preview`. After that, normal full system upgrades with `sudo pacman -Syu` can install newer Scratchtree packages. Pacman verifies the repository index and each package. If the signer changes, check the new full fingerprint in the official release instructions before trusting the replacement key. When Scratchtree announces that an old key is retired or compromised, remove the announced old fingerprint with `sudo pacman-key --delete <old-fingerprint>`. [Pacman upgrades](https://man.archlinux.org/man/pacman.8.en)
+3. Add this block at the end of `/etc/pacman.conf`. [Pacman repository configuration](https://man.archlinux.org/man/pacman.conf.5.en)
+
+   ```ini
+   [scratchtree]
+   SigLevel = Required TrustedOnly
+   Server = https://scratchtree-arch.netlify.app/arch/$arch
+   ```
+
+4. If you're installing Scratchtree for the first time, run `sudo pacman -Syu scratchtree/scratchtree-preview`. If Scratchtree is already installed, use `sudo pacman -Syu` as usual. Pacman verifies the index and package before installing or updating Scratchtree. [Pacman upgrades](https://man.archlinux.org/man/pacman.8.en)
+
+If the signer changes, check the new full fingerprint in these official instructions before trusting the replacement key. When Scratchtree announces that an old key is retired or compromised, remove the announced old fingerprint with `sudo pacman-key --delete <old-fingerprint>`.
 
 ## What CI verifies
 
@@ -46,6 +54,8 @@ To test actual release binaries, manually run the Arch Preview workflow with two
 gh workflow run arch-preview.yml -f older_release=0.3.1 -f newer_release=0.3.2
 ```
 
-This verifies the package upgrade and local note and draft retention. For each release, test the previous-to-new package pair. The [maintainer release checklist](RELEASING.md#verify-the-released-arch-upgrade) covers when to run this check and how to verify the signed HTTPS repository once it is live.
+This verifies the package upgrade and local note and draft retention. For each release, test the previous-to-new package pair. The [maintainer release checklist](RELEASING.md#verify-the-released-arch-upgrade) covers when to run this check and how to verify the signed HTTPS repository before and after publication.
+
+The live repository check repeats a signed clean install and a system upgrade against the published HTTPS URL. It compares the package downloaded by pacman with the checksum-verified public release, and checks a saved note and draft after upgrading.
 
 For broader Arch desktop support beyond this experimental Preview, repeat installation and local use in a full Arch desktop VM using the same package. Check native Wayland and X11 where available, keyboard and pointer use, draft retention, backup file dialogs, and package upgrade with a retained Preview profile. The sign-in controls are present. Real-account sign-in and cross-device synchronization still require acceptance on Linux. The CI smoke covers a virtual X11 session. WebKitGTK may rely on container isolation when nested sandboxing is unavailable.
