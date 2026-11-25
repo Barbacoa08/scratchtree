@@ -13,7 +13,7 @@ import {
   setActivation,
   type Activation,
 } from './detached';
-import { digest } from './intents';
+import { digest, libraryIdForUser } from './intents';
 import { reconcileTransfer } from './rejoin';
 interface Options {
   files: BackupFiles;
@@ -442,7 +442,7 @@ export class PersistentSession {
     const u = db.cloud.currentUser.getValue();
     if (!u.isLoggedIn || !u.userId)
       throw Error('The saved sign-in is unavailable.');
-    const account = await digest(['scratchtree-library', u.userId]);
+    const account = await libraryIdForUser(u.userId);
     if (expected && account !== expected)
       throw Error(
         'These notes belong to another account. Sign out and use the original account.',

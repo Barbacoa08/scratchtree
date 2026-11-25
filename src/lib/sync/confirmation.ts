@@ -1,4 +1,4 @@
-import type { SharedItem, OrderRow, PurgeRow } from './types';
+import type { SharedItem, OrderRow, PurgeRow, ProjectionNotice } from './types';
 import type { Item } from '../domain/notes';
 import { validateSnapshot } from '../domain/validation';
 import { directEntries, scopeIndex } from '../domain/hierarchy';
@@ -340,10 +340,39 @@ export async function readRemoteRow(
     return value;
   });
 }
+export async function readRemoteEpochRows(
+  options: RemoteReadOptions,
+  table: 'notes' | 'orders' | 'purges',
+  epoch: string,
+): Promise<unknown[]> {
+  const values: unknown = await withRemoteAbort(options, async (send) => {
+    const response = await send(
+      `${options.databaseUrl.replace(/\/$/, '')}/my/${table}?epoch=${encodeURIComponent(epoch)}`,
+      {
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${options.token}` },
+      },
+    );
+    if (
+      response.status !== 200 ||
+      response.headers.has('content-range') ||
+      response.headers.has('link')
+    )
+      throw new Error('Incomplete server confirmation.');
+    return response.json();
+  });
+  if (!Array.isArray(values)) throw new Error('Invalid server library.');
+  if (values.some((value) => !record(value) || value.epoch !== epoch))
+    throw new Error('Invalid server epoch filter.');
+  return values.map(applicationFields);
+}
+
 /** A fresh user-scoped view is validated in full; malformed/overflow data never acknowledges writes. */
 export async function readRemoteLibrary(
-  options: RemoteReadOptions & { libraryId: string; epoch: string },
-): Promise<RemoteLibrary> {
+  options: RemoteReadOptions & { libraryId: string },
+): Promise<
+  RemoteLibrary & { shared: SharedEnvelope; notices: ProjectionNotice[] }
+> {
   const pointer = applicationFields(
     await readRemoteRow(options, 'libraries', options.libraryId),
   );
@@ -358,28 +387,8 @@ export async function readRemoteLibrary(
     throw new Error('Invalid server library.');
   const epoch = pointer.epoch;
   const rows: unknown[][] = [];
-  for (const table of ['notes', 'orders', 'purges']) {
-    const values: unknown = await withRemoteAbort(options, async (send) => {
-      const response = await send(
-        `${options.databaseUrl.replace(/\/$/, '')}/my/${table}?epoch=${encodeURIComponent(epoch)}`,
-        {
-          cache: 'no-store',
-          headers: { Authorization: `Bearer ${options.token}` },
-        },
-      );
-      if (
-        response.status !== 200 ||
-        response.headers.has('content-range') ||
-        response.headers.has('link')
-      )
-        throw new Error('Incomplete server confirmation.');
-      return response.json();
-    });
-    if (!Array.isArray(values)) throw new Error('Invalid server library.');
-    if (values.some((value) => !record(value) || value.epoch !== epoch))
-      throw new Error('Invalid server epoch filter.');
-    rows.push(values.map(applicationFields));
-  }
+  for (const table of ['notes', 'orders', 'purges'] as const)
+    rows.push(await readRemoteEpochRows(options, table, epoch));
   // projectLibrary checks every raw field before any checked cast below can escape.
   const projected = projectLibrary(
     rows[0] as Parameters<typeof projectLibrary>[0],
@@ -398,8 +407,7 @@ export async function readRemoteLibrary(
     throw new Error('The server library changed during confirmation.');
   return {
     epoch,
-    items: projected.items,
-    purgedIds: projected.purgedIds,
+    ...projected,
     shared: {
       epoch,
       notes: rows[0] as SharedItem[],

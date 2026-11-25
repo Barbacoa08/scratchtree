@@ -1,0 +1,11 @@
+# Select deploy/maintenance as the package directory and the repository root as the base.
+[build]
+  publish = "deploy/maintenance/public"
+
+[build.environment]
+  NODE_VERSION = "24.21.0"
+  PNPM_VERSION = "12.4.1"
+
+[functions]
+  directory = "deploy/maintenance/functions"
+  node_bundler = "esbuild"

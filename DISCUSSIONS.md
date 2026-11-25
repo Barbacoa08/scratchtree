@@ -40,7 +40,7 @@ The current picker offers nine fixed colors and Reset. Decide whether arbitrary 
 
 ## Trash purge
 
-Manual Delete inside Trash permanently removes the selected item and its children, without Undo. Automatic permanent cleanup is not enabled. Decide any future 90-day cleanup schedule, retention exceptions, and recovery behavior separately; existing backups are not securely erased by logical item deletion.
+**Accepted.** Notes become eligible for automatic permanent deletion after more than 180 days in Trash. Preserve each descendant’s retention window and use the saved dates after a backup restore. Local-only notes catch up when opened. A Netlify Scheduled Function runs the synced sweep directly, and a Cronitor heartbeat reports a failed or missed run. Keep manual Delete in Trash available. [Configuration and verification](docs/TRASH-MAINTENANCE.md)
 
 ## Accounts and synchronization
 

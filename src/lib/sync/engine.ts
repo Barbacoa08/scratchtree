@@ -343,7 +343,6 @@ export class SyncEngine implements SyncPort {
               remote = await readRemoteLibrary({
                 ...options,
                 libraryId: repository.libraryId,
-                epoch: p.epoch,
               });
               if (
                 remote.epoch === p.epoch &&
@@ -384,7 +383,6 @@ export class SyncEngine implements SyncPort {
                 remote = await readRemoteLibrary({
                   ...options,
                   libraryId: repository.libraryId,
-                  epoch: p.epoch,
                 });
                 result = await classifyOutcome(paired, pairedWitness, remote);
               } else result = 'unknown';
@@ -491,7 +489,6 @@ export class SyncEngine implements SyncPort {
           (await readRemoteLibrary({
             ...options,
             libraryId: repository.libraryId,
-            epoch: final.shared.epoch,
           }));
         final = await this.confirmableView();
         if (!final) return false;
