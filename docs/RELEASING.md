@@ -87,7 +87,7 @@ If macOS requests Keychain access, identify the exact requesting build and item 
 
 ## Package and inspect the DMG
 
-The [Mac packaging script](../packaging/macos/build-dmg.py) wraps the staged app in the branded Finder layout. It generates the background at both display scales and adds the native Applications shortcut. Signing the DMG comes after packaging.
+The [Mac packaging script](../packaging/macos/build-dmg.py) wraps the staged app in the branded Finder layout. It generates the light artwork at both display scales so Finder's dark filenames stay readable. It also adds the native Applications shortcut. Signing the DMG comes after packaging.
 
 ![Finder window with Scratchtree on the left and a curved arrow pointing to Applications on the right](media/mac-installer.png)
 
