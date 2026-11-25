@@ -1,10 +1,20 @@
 import {
   captureMoveProof,
-  captureUndoDelete,
+  deleteItem as applyDelete,
+  deletionDescendants,
   moveItems as validateMove,
   purgeItem as validatePurge,
+  reorderItem as applyReorder,
+  structuralItems,
   subtreeIds,
 } from '../domain/items';
+import {
+  captureHistoryEdit,
+  historyMatches,
+  ChangedHistory,
+  type HistoryEdit,
+  type HistoryRequest,
+} from '../domain/workspace-history';
 import {
   emptyWorkspace,
   type WorkspaceSnapshot,
@@ -17,6 +27,7 @@ import {
   effectiveScope,
   itemLocation,
   directEntries,
+  itemLabel,
 } from '../domain/hierarchy';
 import { filterNotes } from '../domain/search';
 import { reorderSelected } from './mouse-selection';
@@ -27,6 +38,7 @@ import type {
   CaptureItem,
   CreateChildTree,
   ReorderItem,
+  DeleteAttempt,
   PurgeItem,
   PurgeRequest,
   PurgeResult,
@@ -51,6 +63,10 @@ export type WorkspaceOperation =
   | 'preview-restore'
   | 'restore';
 class ChangedGroupDeletion extends Error {}
+
+type HistoryAction = 'Move' | 'Reorder' | 'Delete';
+type HistoryEntry = { id: string; action: HistoryAction; edit: HistoryEdit };
+const WORKSPACE_HISTORY_LIMIT = 10;
 
 type CompletionIntent =
   { id: string; done: boolean } | { ids: string[]; done: boolean };
@@ -90,6 +106,10 @@ function errorMessage(error: unknown) {
 
 export interface ViewState {
   snapshot: WorkspaceSnapshot;
+  undoAction: HistoryAction | null;
+  redoAction: HistoryAction | null;
+  historyResult: { ids: string[] } | null;
+  historyRetryDirection: HistoryRequest['direction'] | null;
   pendingCapture: CaptureItem | null;
   keyboardOrder: readonly string[] | null;
   keyboardReorderIds: readonly string[] | null;
@@ -115,6 +135,10 @@ export interface ViewState {
 export class WorkspaceController {
   state: ViewState = {
     snapshot: emptyWorkspace(),
+    undoAction: null,
+    redoAction: null,
+    historyResult: null,
+    historyRetryDirection: null,
     pendingCapture: null,
     keyboardOrder: null,
     keyboardReorderIds: null,
@@ -163,6 +187,14 @@ export class WorkspaceController {
   private retryGenerations = new WeakMap<() => Promise<boolean>, number>();
   private completionGenerations = new WeakMap<object, number>();
   private groupDeleteRetries = new WeakMap<() => Promise<boolean>, string>();
+  private history: HistoryEntry[] = [];
+  private historyCursor = 0;
+  private historyPending = false;
+  private historyRetry: {
+    direction: HistoryRequest['direction'];
+    run: () => Promise<boolean>;
+    submitted: boolean;
+  } | null = null;
   private get retryIntent() {
     return this.storedRetryIntent;
   }
@@ -364,6 +396,7 @@ export class WorkspaceController {
           }
         }
         if (refresh?.replaced) {
+          this.resetHistory();
           this.captureIntents.clear();
           this.reconciledCaptures.clear();
           this.childIntents.clear();
@@ -555,6 +588,7 @@ export class WorkspaceController {
   }
 
   stageKeyboardReorder(ids: readonly string[], direction: -1 | 1) {
+    if (this.historyBlocksStructure()) return null;
     if (
       this.disposed ||
       !this.state.loaded ||
@@ -740,6 +774,7 @@ export class WorkspaceController {
         this.snapshot(result, this.clearKeyboardReorder(changedKeyboardOrder));
         return false;
       }
+      this.recordMove(attempt.request, result);
       batch.before = attempt.after;
       batch.attempt = null;
       if (sameOrder(batch.desired, batch.before)) {
@@ -767,7 +802,10 @@ export class WorkspaceController {
         if (!ownsView()) return false;
         if (current) {
           try {
-            validateMove(structuredClone(current), attempt.request);
+            validateMove(structuredClone(current), {
+              ...attempt.request,
+              operationId: undefined,
+            });
           } catch {
             this.snapshot(
               current,
@@ -914,6 +952,7 @@ export class WorkspaceController {
     return this.navigate(id, at);
   }
   createTree(selectedId?: string, retry?: CreateChildTree) {
+    if (this.historyBlocksStructure()) return Promise.resolve(false);
     if (this.creating) return this.creating;
     const selected = selectedId
       ? this.state.snapshot.items.find((x) => x.id === selectedId)
@@ -1018,6 +1057,7 @@ export class WorkspaceController {
     const retries = [...this.uncertainPurgeRetries.values()];
     return (
       retries.find(({ retry }) => this.isCurrentRetry(retry))?.retry ??
+      this.historyRetry?.run ??
       this.retryIntent ??
       retries[0]?.retry ??
       null
@@ -1066,6 +1106,7 @@ export class WorkspaceController {
   save(key = this.state.activeKey) {
     const compose = composeOwner(key);
     if (!compose) return this.finishEdit(key);
+    if (this.historyBlocksStructure()) return Promise.resolve(false);
     if (this.saving) return this.saving;
     const pending = this.captureIntents.get(key);
     const buffer = this.state.buffers[key];
@@ -1280,6 +1321,13 @@ export class WorkspaceController {
   }
   remove(id = this.state.activeKey) {
     if (composeOwner(id)) return Promise.resolve(false);
+    if (this.historyBlocksStructure()) return Promise.resolve(false);
+    const from = this.state.snapshot.items.some((item) => item.id === id)
+      ? itemLocation(this.state.snapshot.items, id)
+      : null;
+    const descendants = from
+      ? deletionDescendants(this.state.snapshot, id)
+      : [];
     const view = this.viewIntent;
     const origin = { ...this.state.location };
     const leave =
@@ -1288,73 +1336,101 @@ export class WorkspaceController {
       subtreeIds(this.state.snapshot, id).includes(origin.itemId)
         ? origin
         : undefined;
-    return this.run(async () => {
-      this.patch({ operation: 'delete' });
-      try {
-        if (!(await this.checkpoint())) {
-          this.retryIntent = () => this.remove(id);
-          this.patch({ mutationRetry: true });
-          return false;
-        }
-        if (!(await this.reconcileCreations())) {
-          this.retryIntent = () => this.remove(id);
-          this.patch({ mutationRetry: true });
-          return false;
-        }
-        const prior = this.state.snapshot;
-        const current = this.state.location;
-        const target = prior.items.find((x) => x.id === id);
-        if (!target) throw new Error('This note is unavailable.');
-        this.snapshot(await this.repo.deleteItem(id, leave));
-        if (view === this.viewIntent) {
-          let at = current;
-          if (
-            current.itemId !== null &&
-            effectiveScope(this.state.snapshot.items, current.itemId) !==
-              current.scope
-          ) {
-            let parent = target.parentId;
-            while (
-              parent !== null &&
-              effectiveScope(this.state.snapshot.items, parent) !==
-                current.scope
-            )
-              parent =
-                this.state.snapshot.items.find((x) => x.id === parent)
-                  ?.parentId ?? null;
-            at = { scope: current.scope, itemId: parent };
+    let before: WorkspaceSnapshot | undefined;
+    let attempt: DeleteAttempt | undefined;
+    const repeat = (): Promise<boolean> =>
+      this.run(async () => {
+        this.patch({ operation: 'delete' });
+        try {
+          if (!(await this.checkpoint())) {
+            this.retryIntent = repeat;
+            this.patch({ mutationRetry: true });
+            return false;
           }
-          this.patch({ ownerId: at.itemId, location: at });
-          if (
-            this.state.activeKey === id ||
-            at !== current ||
-            (!composeOwner(this.state.activeKey) &&
-              effectiveScope(
-                this.state.snapshot.items,
-                this.state.activeKey,
-              ) !== at.scope)
-          )
-            this.context(composeKey(at));
+          if (!(await this.reconcileCreations())) {
+            this.retryIntent = repeat;
+            this.patch({ mutationRetry: true });
+            return false;
+          }
+          const prior = this.state.snapshot;
+          const current = this.state.location;
+          const target = prior.items.find((x) => x.id === id);
+          if (!target) throw new Error('This note is unavailable.');
+          before ??= this.uncertainPurgeRetries.size
+            ? await this.repo.loadWorkspace()
+            : prior;
+          if (!from || from.scope !== 'live')
+            throw new Error('This live note is unavailable.');
+          const captured = (attempt ??= {
+            id: crypto.randomUUID(),
+            from,
+            before: directEntries(before, from).map((item) => item.id),
+            trash: directEntries(before, { scope: 'trash', itemId: null }).map(
+              (item) => item.id,
+            ),
+            descendants,
+            deletedAt: Math.max(Date.now(), target.updatedAt + 1),
+          });
+          const saved = await this.repo.deleteItem(id, leave, captured);
+          this.recordStructuralAction(
+            captured.id,
+            'Delete',
+            [id],
+            before,
+            saved,
+            (expected) => applyDelete(expected, id, leave, captured),
+          );
+          this.snapshot(saved);
+          if (view === this.viewIntent) {
+            let at = current;
+            if (
+              current.itemId !== null &&
+              effectiveScope(this.state.snapshot.items, current.itemId) !==
+                current.scope
+            ) {
+              let parent = target.parentId;
+              while (
+                parent !== null &&
+                effectiveScope(this.state.snapshot.items, parent) !==
+                  current.scope
+              )
+                parent =
+                  this.state.snapshot.items.find((x) => x.id === parent)
+                    ?.parentId ?? null;
+              at = { scope: current.scope, itemId: parent };
+            }
+            this.patch({ ownerId: at.itemId, location: at });
+            if (
+              this.state.activeKey === id ||
+              at !== current ||
+              (!composeOwner(this.state.activeKey) &&
+                effectiveScope(
+                  this.state.snapshot.items,
+                  this.state.activeKey,
+                ) !== at.scope)
+            )
+              this.context(composeKey(at));
+          }
+          this.retryIntent = null;
+          this.patch({
+            status:
+              target.deletedAt !== null
+                ? 'This note is already in Trash. Restore is available.'
+                : 'Moved to Trash',
+            error: '',
+            mutationRetry: this.uncertainPurgeRetries.size > 0,
+          });
+          return true;
+        } catch (e) {
+          this.error(e);
+          this.retryIntent = repeat;
+          this.patch({ mutationRetry: true });
+          return false;
+        } finally {
+          this.patch({ operation: null });
         }
-        this.retryIntent = null;
-        this.patch({
-          status:
-            target.deletedAt !== null
-              ? 'This note is already in Trash. Restore is available.'
-              : 'Deleted. Undo delete is available.',
-          error: '',
-          mutationRetry: this.uncertainPurgeRetries.size > 0,
-        });
-        return true;
-      } catch (e) {
-        this.error(e);
-        this.retryIntent = () => this.remove(id);
-        this.patch({ mutationRetry: true });
-        return false;
-      } finally {
-        this.patch({ operation: null });
-      }
-    });
+      });
+    return repeat();
   }
   capturePurge(id: string): PurgeItem {
     if (effectiveScope(this.state.snapshot.items, id) !== 'trash')
@@ -1377,6 +1453,7 @@ export class WorkspaceController {
     };
   }
   purgeItem(request: PurgeRequest): Promise<boolean> {
+    if (this.historyBlocksStructure()) return Promise.resolve(false);
     const key =
       'id' in request ? request.id : JSON.stringify([...request.ids].sort());
     const pending = this.uncertainPurgeRetries.get(key);
@@ -1508,6 +1585,7 @@ export class WorkspaceController {
           at = { scope: at.scope, itemId: parent };
         }
         this.acknowledgePurgeRetry(key);
+        this.clearRedo();
         const completion = this.state.completionRetry;
         const removesCompletionTarget =
           completion &&
@@ -1590,6 +1668,7 @@ export class WorkspaceController {
       ...remaining.slice(toIndex),
     ];
     return captureMoveProof(this.state.snapshot, {
+      operationId: crypto.randomUUID(),
       ids: source.ids,
       from: { ...source.from },
       to: { ...to },
@@ -1616,6 +1695,7 @@ export class WorkspaceController {
     )
       throw new Error('Invalid sibling order.');
     return captureMoveProof(this.state.snapshot, {
+      operationId: crypto.randomUUID(),
       ids: source.ids,
       from: { ...source.from },
       to: { ...source.from },
@@ -1647,16 +1727,21 @@ export class WorkspaceController {
           if (this.retryIntent === retry) {
             const current = await this.repo.loadWorkspace();
             try {
-              validateMove(structuredClone(current), captured);
+              validateMove(structuredClone(current), {
+                ...captured,
+                operationId: undefined,
+              });
             } catch {
               throw new ChangedGroupDeletion(
                 'The selection changed. Review the notes and delete again.',
               );
             }
           }
-          return this.repo.moveItems(captured);
+          const saved = await this.repo.moveItems(captured);
+          this.recordMove(captured, saved);
+          return saved;
         },
-        'Deleted. Undo delete is available.',
+        'Moved to Trash',
         retry,
       );
     this.groupDeleteRetries.set(retry, key);
@@ -1666,7 +1751,11 @@ export class WorkspaceController {
     const captured = structuredClone(request);
     return this.itemMetadata(
       'move',
-      () => this.repo.moveItems(captured),
+      async () => {
+        const saved = await this.repo.moveItems(captured);
+        this.recordMove(captured, saved);
+        return saved;
+      },
       'Notes moved',
     );
   }
@@ -1731,7 +1820,11 @@ export class WorkspaceController {
   restoreItem(id: string) {
     return this.itemMetadata(
       'restore-item',
-      () => this.repo.restoreItem(id),
+      async () => {
+        const saved = await this.repo.restoreItem(id);
+        this.clearRedo();
+        return saved;
+      },
       'Note restored',
     );
   }
@@ -1744,9 +1837,29 @@ export class WorkspaceController {
   }
   reorderItem(request: ReorderItem) {
     const captured = structuredClone(request);
+    const actionId = crypto.randomUUID();
+    captured.attempt = {
+      id: actionId,
+      before: directEntries(this.state.snapshot, captured.group).map(
+        (item) => item.id,
+      ),
+    };
+    let before: WorkspaceSnapshot | undefined;
     return this.itemMetadata(
       'reorder',
-      () => this.repo.reorderItem(captured),
+      async () => {
+        before ??= this.state.snapshot;
+        const saved = await this.repo.reorderItem(captured);
+        this.recordStructuralAction(
+          actionId,
+          'Reorder',
+          [captured.id],
+          before,
+          saved,
+          (expected) => applyReorder(expected, captured),
+        );
+        return saved;
+      },
       'Order updated',
     );
   }
@@ -1756,6 +1869,8 @@ export class WorkspaceController {
     status: string,
     retry?: () => Promise<boolean>,
   ) {
+    if (operation !== 'color' && this.historyBlocksStructure())
+      return Promise.resolve(false);
     const repeat = retry ?? (() => this.itemMetadata(operation, fn, status));
     return this.run(async () => {
       this.patch({ operation });
@@ -1806,19 +1921,237 @@ export class WorkspaceController {
     )
       this.context(composeKey(at));
   }
-  undoRemove() {
-    let captured: ReturnType<typeof captureUndoDelete>;
-    try {
-      captured = captureUndoDelete(this.state.snapshot);
-    } catch (e) {
-      this.error(e);
-      return Promise.resolve(false);
+  private resetHistory() {
+    this.history = [];
+    this.historyCursor = 0;
+    this.clearHistoryRetry();
+    this.patch({ undoAction: null, redoAction: null, historyResult: null });
+  }
+
+  private clearHistoryRetry() {
+    if (!this.historyRetry) return;
+    if (this.retryIntent === this.historyRetry.run) this.retryIntent = null;
+    this.historyRetry = null;
+    this.patch({
+      historyRetryDirection: null,
+      mutationRetry: this.pendingMutationRetry !== null,
+    });
+  }
+
+  private historyBlocksStructure() {
+    if (this.historyPending) return true;
+    if (!this.historyRetry?.submitted) return false;
+    this.patch({
+      error: `Retry ${this.historyRetry.direction === 'undo' ? 'Undo' : 'Redo'} before making another change to note order or placement.`,
+      mutationRetry: true,
+    });
+    return true;
+  }
+
+  private historyAvailability() {
+    return {
+      undoAction: this.history[this.historyCursor - 1]?.action ?? null,
+      redoAction: this.history[this.historyCursor]?.action ?? null,
+    };
+  }
+
+  private clearRedo() {
+    if (this.history.length === this.historyCursor) return;
+    this.history.length = this.historyCursor;
+    this.patch(this.historyAvailability());
+  }
+
+  private recordHistory(
+    id: string,
+    action: HistoryAction,
+    edit: HistoryEdit | null,
+    saved: WorkspaceSnapshot,
+  ) {
+    if (!edit || this.history.some((entry) => entry.id === id)) return;
+    this.clearHistoryRetry();
+    if (!historyMatches(saved, edit, 'after')) {
+      this.resetHistory();
+      return;
     }
-    return this.itemMetadata(
-      'restore-item',
-      () => this.repo.undoDelete(captured),
-      'Delete undone',
+    this.history = [
+      ...this.history.slice(0, this.historyCursor),
+      { id, action, edit },
+    ].slice(-WORKSPACE_HISTORY_LIMIT);
+    this.historyCursor = this.history.length;
+    this.patch(this.historyAvailability());
+  }
+
+  private recordMove(request: MoveItems, saved: WorkspaceSnapshot) {
+    if (!request.proof || !request.operationId) return;
+    const action = sameLocation(request.from, request.to)
+      ? 'Reorder'
+      : request.from.scope === 'live' && request.to.scope === 'trash'
+        ? 'Delete'
+        : 'Move';
+    this.recordHistory(
+      request.operationId,
+      action,
+      captureHistoryEdit(
+        request.proof.before,
+        request.proof.after,
+        request.ids,
+      ),
+      saved,
     );
+  }
+
+  private recordStructuralAction(
+    actionId: string,
+    action: HistoryAction,
+    ids: string[],
+    before: WorkspaceSnapshot,
+    saved: WorkspaceSnapshot,
+    apply: (s: WorkspaceSnapshot) => void,
+  ) {
+    const expected = {
+      items: before.items.map((item) => ({ ...item })),
+      drafts: [],
+      undoDeleteIds: [],
+    };
+    try {
+      apply(expected);
+    } catch {
+      this.resetHistory();
+      return;
+    }
+    this.recordHistory(
+      actionId,
+      action,
+      captureHistoryEdit(
+        structuralItems(before),
+        structuralItems(expected),
+        ids,
+      ),
+      saved,
+    );
+  }
+
+  undoRemove() {
+    return this.changeHistory('undo');
+  }
+
+  redo() {
+    return this.changeHistory('redo');
+  }
+
+  private changeHistory(direction: HistoryRequest['direction']) {
+    if (this.historyRetry?.direction === direction)
+      return this.historyRetry.run();
+    if (this.historyBlocksStructure()) return Promise.resolve(false);
+    const epoch = this.snapshotEpoch;
+    const offset = direction === 'undo' ? -1 : 0;
+    let entry =
+      direction === 'undo' && this.keyboardReorder
+        ? undefined
+        : this.history[this.historyCursor + offset];
+    let captured: HistoryRequest | undefined;
+    const repeat = () => {
+      if (this.historyPending) return Promise.resolve(false);
+      if (!entry && !this.keyboardReorder) return Promise.resolve(false);
+      this.historyPending = true;
+      return this.run(async () => {
+        this.patch({
+          operation:
+            direction === 'undo' && entry?.action === 'Delete'
+              ? 'restore-item'
+              : 'move',
+        });
+        try {
+          if (this.repo.viewEpoch !== epoch) throw new ChangedHistory();
+          if (
+            !(await this.checkpoint()) ||
+            !(await this.reconcileCreations())
+          ) {
+            if (this.keyboardReorder || !entry) return false;
+            this.retryIntent = repeat;
+            this.historyRetry = {
+              direction,
+              run: repeat,
+              submitted: !!captured,
+            };
+            this.patch({ mutationRetry: true });
+            return false;
+          }
+          if (this.repo.viewEpoch !== epoch) throw new ChangedHistory();
+          const next = this.history[this.historyCursor + offset];
+          if (!next || (entry && next !== entry)) {
+            this.clearHistoryRetry();
+            return false;
+          }
+          entry = next;
+          captured ??= {
+            id: crypto.randomUUID(),
+            actionId: entry.id,
+            edit: entry.edit,
+            direction,
+            deletion: entry.action === 'Delete',
+          };
+          const saved = await this.repo.applyHistory(captured);
+          this.historyCursor += direction === 'undo' ? -1 : 1;
+          this.retryIntent = null;
+          this.clearHistoryRetry();
+          const where = itemLocation(saved.items, entry.edit.ids[0]);
+          const index = new Map(saved.items.map((item) => [item.id, item]));
+          const area = where.scope === 'trash' ? 'Trash' : 'Root';
+          const tail = [];
+          let owner =
+            where.itemId === null ? undefined : index.get(where.itemId);
+          while (owner && tail.length < 2) {
+            tail.unshift(itemLabel(owner));
+            owner =
+              owner.parentId === null || owner.deletedAt !== null
+                ? undefined
+                : index.get(owner.parentId);
+          }
+          const location = [area, ...(owner ? ['…'] : []), ...tail].join(' / ');
+          this.snapshot(saved, {
+            ...this.historyAvailability(),
+            historyResult: { ids: entry.edit.ids },
+            error: '',
+            mutationRetry: this.uncertainPurgeRetries.size > 0,
+            status: `${entry.action} ${direction === 'undo' ? 'undone' : 'redone'}. Notes in ${location}.`,
+          });
+          this.reconcileScope();
+          return true;
+        } catch (e) {
+          const changed =
+            isReplacedLibrary(e) ||
+            (typeof e === 'object' &&
+              e !== null &&
+              'code' in e &&
+              e.code === 'history_changed');
+          if (changed) {
+            this.resetHistory();
+            this.retryIntent = null;
+          } else {
+            this.retryIntent = repeat;
+            this.historyRetry = {
+              direction,
+              run: repeat,
+              submitted: !!captured,
+            };
+          }
+          if (changed)
+            this.patch({ error: errorMessage(e), status: 'History cleared' });
+          else this.error(e);
+          this.patch({
+            mutationRetry: this.pendingMutationRetry !== null,
+            historyRetryDirection: captured && !changed ? direction : null,
+          });
+          return false;
+        } finally {
+          this.patch({ operation: null });
+        }
+      }).finally(() => {
+        this.historyPending = false;
+      });
+    };
+    return repeat();
   }
 
   export(successStatus = 'Backup exported') {
@@ -1871,6 +2204,7 @@ export class WorkspaceController {
         if (s) {
           this.snapshotEpoch = this.repo.viewEpoch;
           clearTimeout(this.timer);
+          this.resetHistory();
           this.snapshot(s);
           this.resetBuffers(s);
           this.patch({

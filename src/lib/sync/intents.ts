@@ -1,10 +1,12 @@
 import type { Placement } from './types';
 import type { BackupV8 } from './backup';
 import type { ColorToken, Location, Item } from '../domain/notes';
+import type { HistoryRequest } from '../domain/workspace-history';
 import type {
   CaptureItem,
   CreateChildTree,
   DraftAck,
+  DeleteAttempt,
   MoveItems,
   PurgeRequest,
   ReorderItem,
@@ -19,12 +21,18 @@ export type IntentCommand =
   | { kind: 'captureItem'; request: CaptureItem }
   | { kind: 'createChildTree'; request: CreateChildTree }
   | { kind: 'promoteItem'; id: string }
-  | { kind: 'deleteItem'; id: string; leave?: Location }
+  | {
+      kind: 'deleteItem';
+      id: string;
+      leave?: Location;
+      attempt?: DeleteAttempt;
+    }
   | { kind: 'purgeItem'; request: PurgeRequest }
   | { kind: 'transitionLocation'; request: TransitionLocation }
   | { kind: 'moveItems'; request: MoveItems }
   | { kind: 'restoreItem'; id: string }
   | { kind: 'undoDelete'; request: UndoDeleteRequest }
+  | { kind: 'applyHistory'; request: HistoryRequest }
   | { kind: 'setItemDone'; id: string; done: boolean }
   | { kind: 'setItemsDone'; ids: string[]; done: boolean }
   | { kind: 'setItemColor'; id: string; color: ColorToken | null }
@@ -35,6 +43,18 @@ export type IntentCommand =
       newEpoch: string;
       backup: BackupV8;
     };
+export function historyOperationId(command: IntentCommand): string | undefined {
+  switch (command.kind) {
+    case 'moveItems':
+      return command.request.operationId;
+    case 'deleteItem':
+      return command.attempt?.id;
+    case 'reorderItem':
+      return command.request.attempt?.id;
+    case 'applyHistory':
+      return command.request.id;
+  }
+}
 /** Only actual operation-owned changes are retained; unchanged Markdown is absent. */
 export type ItemFieldDeltas = {
   [
@@ -73,6 +93,7 @@ export interface ExpectedOutcome {
   items: ItemOutcome[];
   purgedIds: string[];
   orders: { group: Location; ids: string[] }[];
+  structure?: { before: string; after: string };
 }
 export interface PendingIntent {
   sequence: number;

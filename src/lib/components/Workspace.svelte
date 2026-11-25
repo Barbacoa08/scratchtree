@@ -126,8 +126,9 @@
       : emptyMouseSelection();
   }
   let undoPending = $state(false);
+  let undoButton = $state<HTMLButtonElement>();
+  let redoButton = $state<HTMLButtonElement>();
   let undoRetry: {
-    ids: string[];
     identity: object;
     epoch: number;
     interaction: number;
@@ -445,6 +446,16 @@
       modal,
   );
   let blocked = $derived(operationBlocked || keyboardOrder !== null);
+  let undoAvailable = $derived(
+    viewState.historyRetryDirection !== 'redo' &&
+      (!!viewState.undoAction ||
+        (keyboardOrder !== null && !viewState.keyboardReorderError)),
+  );
+  let redoAvailable = $derived(
+    viewState.historyRetryDirection !== 'undo' &&
+      !!viewState.redoAction &&
+      keyboardOrder === null,
+  );
   let selectionBlocked = $derived(
     operationBlocked ||
       (keyboardOrder !== null &&
@@ -1278,7 +1289,9 @@
       if (navigation.acknowledge(controller.state.location)) historyRevision++;
       const entries = currentEntries();
       const restored = ownsUndoSelection
-        ? undo?.ids.find((id) => entries.some((entry) => entry.id === id))
+        ? controller.state.historyResult?.ids.find((id) =>
+            entries.some((entry) => entry.id === id),
+          )
         : undefined;
       if (ownsCapture) setSelected('');
       else if (restored) setSelected(restored);
@@ -1332,20 +1345,28 @@
       focus.stop();
     }
   }
-  async function undoDelete() {
-    if (blocked || undoPending) return;
+  async function changeWorkspaceHistory(
+    direction: 'undo' | 'redo',
+    fromButton = false,
+  ) {
+    if (
+      operationBlocked ||
+      undoPending ||
+      !(direction === 'undo' ? undoAvailable : redoAvailable)
+    )
+      return;
     undoPending = true;
     clearDrag();
-    const ids = [...controller.state.snapshot.undoDeleteIds],
-      epoch = workspaceEpoch,
+    const epoch = workspaceEpoch,
       ordinal = shownEntries.findIndex((x) => x.id === selected),
       request = ++interaction,
       focus = observeSubmissionFocus();
     try {
-      const ok = await controller.undoRemove();
+      const ok = await (direction === 'undo'
+        ? controller.undoRemove()
+        : controller.redo());
       if (!ok && epoch === workspaceEpoch && controller.commandRetryIdentity)
         undoRetry = {
-          ids,
           identity: controller.commandRetryIdentity,
           epoch,
           interaction: request,
@@ -1353,17 +1374,28 @@
       if (!ok || epoch !== workspaceEpoch || request !== interaction) return;
       undoRetry = null;
       const entries = currentEntries();
-      const restored = ids.find((id) => entries.some((x) => x.id === id));
+      const restored = controller.state.historyResult?.ids.find((id) =>
+        entries.some((x) => x.id === id),
+      );
       if (restored) setSelected(restored);
       else if (!entries.some((x) => x.id === selected))
         setSelected(
           entries[Math.min(Math.max(ordinal, 0), entries.length - 1)]?.id ?? '',
         );
       selection.remember(controller.state.location, selected);
+      undoPending = false;
       await tick();
       scrollSelection();
-      if (focus.mayRestore()) {
-        if (selected) stream?.focus();
+      if (request === interaction && focus.mayRestore()) {
+        const controls =
+          direction === 'undo'
+            ? [undoButton, redoButton]
+            : [redoButton, undoButton];
+        const button = fromButton
+          ? controls.find((control) => control && !control.disabled)
+          : undefined;
+        if (button) button.focus();
+        else if (selected) stream?.focus();
         else composer?.focus();
       }
     } finally {
@@ -1846,6 +1878,21 @@
     )
       return;
     const key = event.key.toLowerCase();
+    if (primaryModifier(event) && key === 'z') {
+      if (
+        !operationBlocked &&
+        !undoPending &&
+        viewState.operation === null &&
+        !event.repeat &&
+        !isTyping(event.target) &&
+        !window.getSelection()?.toString() &&
+        (event.shiftKey ? redoAvailable : undoAvailable)
+      ) {
+        event.preventDefault();
+        void changeWorkspaceHistory(event.shiftKey ? 'redo' : 'undo');
+      }
+      return;
+    }
     if (
       primaryModifier(event) &&
       !event.shiftKey &&
@@ -1891,17 +1938,6 @@
       } else if (key === 'f') {
         event.preventDefault();
         search?.focus();
-      } else if (
-        key === 'z' &&
-        !undoPending &&
-        viewState.operation === null &&
-        !event.repeat &&
-        !isTyping(event.target) &&
-        !window.getSelection()?.toString() &&
-        viewState.snapshot.undoDeleteIds.length
-      ) {
-        event.preventDefault();
-        void undoDelete();
       } else if (
         key === 'backspace' &&
         !event.repeat &&
@@ -2300,16 +2336,33 @@
               onclick={() => controller.previewRestore()}
               disabled={operationBlocked}
               ><Icon name="download" /> Restore backup</button
-            >{/if}<button
-            onclick={() => void undoDelete()}
-            disabled={!viewState.snapshot.undoDeleteIds.length ||
-              undoPending ||
-              blocked}
-            data-unavailable={!viewState.snapshot.undoDeleteIds.length ||
-            undoPending
-              ? ''
-              : undefined}><Icon name="undo" /> Undo delete</button
+            >{/if}
+          <div
+            class="workspace-history-actions"
+            role="group"
+            aria-label="Workspace history"
           >
+            <button
+              type="button"
+              bind:this={undoButton}
+              onclick={() => void changeWorkspaceHistory('undo', true)}
+              disabled={!undoAvailable || undoPending || operationBlocked}
+              data-unavailable={!undoAvailable || undoPending ? '' : undefined}
+              title={undoAvailable
+                ? `Undo ${(keyboardOrder ? 'Reorder' : viewState.undoAction)?.toLowerCase()} (${commandLabel}+Z)`
+                : 'Nothing to undo'}><Icon name="undo" /> Undo</button
+            >
+            <button
+              type="button"
+              bind:this={redoButton}
+              onclick={() => void changeWorkspaceHistory('redo', true)}
+              disabled={!redoAvailable || undoPending || operationBlocked}
+              data-unavailable={!redoAvailable || undoPending ? '' : undefined}
+              title={redoAvailable
+                ? `Redo ${viewState.redoAction?.toLowerCase()} (${commandLabel}+Shift+Z)`
+                : 'Nothing to redo'}><Icon name="redo" /> Redo</button
+            >
+          </div>
         </div>
         {#if desktopUpdates && viewState.loaded}
           <DesktopUpdate
@@ -2686,10 +2739,17 @@
               >
             </div>
             <div>
-              <span aria-hidden="true">Undo delete</span><span class="sr-only"
-                >Undo delete outside text editing: {commandLabel} Z</span
+              <span aria-hidden="true">Undo</span><span class="sr-only"
+                >Workspace Undo outside text editing: {commandLabel} Z</span
               ><span class="shortcut-keys" aria-hidden="true"
                 ><kbd>{commandGlyph}</kbd><kbd>Z</kbd></span
+              >
+            </div>
+            <div>
+              <span aria-hidden="true">Redo</span><span class="sr-only"
+                >Workspace Redo outside text editing: {commandLabel} Shift Z</span
+              ><span class="shortcut-keys" aria-hidden="true"
+                ><kbd>{commandGlyph}</kbd><kbd>Shift</kbd><kbd>Z</kbd></span
               >
             </div>
           </div>

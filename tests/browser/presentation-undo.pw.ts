@@ -6,8 +6,8 @@ const stream = (page: Page) =>
   page.getByRole('region', { name: 'Note stream' });
 const card = (page: Page, id: string) =>
   page.locator(`[data-entry-id="${id}"]`);
-async function seed(page: Page) {
-  await page.goto('/?fixture');
+async function seed(page: Page, url = '/?fixture') {
+  await page.goto(url);
   await capture(page).waitFor();
   return page.evaluate(async () => {
     const t = (window as any).__test;
@@ -102,7 +102,7 @@ for (const scale of [100, 150])
       const columns = [
         search,
         home,
-        ...el.querySelectorAll('.backup-actions button'),
+        ...el.querySelectorAll('.backup-actions > button'),
       ].map((item) => {
         const icon = item.querySelector('svg')!.getBoundingClientRect();
         if (item === search)
@@ -153,12 +153,7 @@ for (const scale of [100, 150])
           ).length,
       ),
     ).toBe(0);
-    for (const name of [
-      'Trash',
-      'Export backup',
-      'Restore backup',
-      'Undo delete',
-    ]) {
+    for (const name of ['Trash', 'Export backup', 'Restore backup', 'Undo']) {
       const action = page.getByRole('button', { name, exact: true });
       await action.focus();
       await expect(action).toBeFocused();
@@ -223,7 +218,7 @@ test('palette renders swatches and a reset glyph while retaining names, saved ch
     .toBe('pink');
 });
 
-test('workspace Command-Z restores the exact persistent deletion once and selects it', async ({
+test('workspace Command-Z restores the exact deletion once and selects it', async ({
   page,
 }) => {
   const ids = await deleted(page);
@@ -237,6 +232,77 @@ test('workspace Command-Z restores the exact persistent deletion once and select
       () => (window as any).__test.repo.snapshot.items.length,
     ),
   ).toBe(2);
+});
+
+test('inline Undo and Redo share one history with the workspace shortcuts', async ({
+  page,
+}) => {
+  const ids = await seed(page);
+  const history = page.getByRole('group', { name: 'Workspace history' });
+  const undo = history.getByRole('button', { name: 'Undo', exact: true });
+  const redo = history.getByRole('button', { name: 'Redo', exact: true });
+  await expect(undo).toBeDisabled();
+  await expect(redo).toBeDisabled();
+  await card(page, ids[0]).click();
+  await page.keyboard.press('Meta+Backspace');
+  await expect(undo).toBeEnabled();
+  expect((await undo.boundingBox())?.y).toBe((await redo.boundingBox())?.y);
+  await undo.click();
+  await expect(card(page, ids[0])).toBeVisible();
+  await expect(redo).toBeEnabled();
+  await expect(redo).toBeFocused();
+  await stream(page).focus();
+  await page.keyboard.press('Meta+Shift+z');
+  await expect(card(page, ids[0])).toHaveCount(0);
+  await expect(redo).toBeDisabled();
+});
+
+test('Command-Z during a staged keyboard reorder undoes that reorder before an older deletion', async ({
+  page,
+}) => {
+  const ids = await seed(page);
+  const third = await page.evaluate(async () => {
+    const t = (window as any).__test;
+    const id = crypto.randomUUID();
+    await t.repo.captureItem({
+      id,
+      location: { scope: 'live', itemId: null },
+      markdown: 'Third note',
+      draft: { key: 'compose', revision: 0 },
+    });
+    await t.controller.refreshFromRepository();
+    return id;
+  });
+  await card(page, ids[0]).click();
+  await page.keyboard.press('Meta+Backspace');
+  await expect(card(page, ids[0])).toHaveCount(0);
+  await card(page, third).click();
+  await page.keyboard.press('Meta+ArrowUp');
+  await page.keyboard.press('Meta+z');
+  await expect(stream(page).locator('[data-entry-id]').first()).toHaveAttribute(
+    'data-entry-id',
+    ids[1],
+  );
+  await expect(card(page, ids[0])).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Redo', exact: true }),
+  ).toBeEnabled();
+});
+
+test('Linux uses Control for workspace Undo and Redo', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64' });
+    (window as any).isTauri = true;
+    (window as any).__TAURI_INTERNALS__ = { invoke: async () => {} };
+  });
+  const ids = await seed(page, '/?fixture&lifecycle');
+  await card(page, ids[0]).click();
+  await page.keyboard.press('Control+Backspace');
+  await expect(card(page, ids[0])).toHaveCount(0);
+  await page.keyboard.press('Control+z');
+  await expect(card(page, ids[0])).toBeVisible();
+  await page.keyboard.press('Control+Shift+z');
+  await expect(card(page, ids[0])).toHaveCount(0);
 });
 
 for (const guard of [
@@ -353,8 +419,8 @@ test('failed workspace Undo keeps exact marker and draft; retrying command prese
   await page.evaluate(() => {
     const t = (window as any).__test;
     t.repo.fail = null;
-    const original = t.repo.undoDelete.bind(t.repo);
-    t.repo.undoDelete = async (request: any) => {
+    const original = t.repo.applyHistory.bind(t.repo);
+    t.repo.applyHistory = async (request: any) => {
       await new Promise<void>((resolve) => {
         t.releaseUndo = resolve;
       });
@@ -432,14 +498,14 @@ test('pending workspace Undo accepts only one request across released Command-Z 
       t.releaseUndo = resolve;
     });
     const originalRequest = t.controller.undoRemove.bind(t.controller);
-    const originalWrite = t.repo.undoDelete.bind(t.repo);
+    const originalWrite = t.repo.applyHistory.bind(t.repo);
     t.undoRequests = 0;
     t.undoWrites = 0;
     t.controller.undoRemove = () => {
       t.undoRequests++;
       return originalRequest();
     };
-    t.repo.undoDelete = async (request: any) => {
+    t.repo.applyHistory = async (request: any) => {
       t.undoWrites++;
       await pending;
       return originalWrite(request);
@@ -453,7 +519,7 @@ test('pending workspace Undo accepts only one request across released Command-Z 
   await expect(capture(page)).toHaveText('unsubmitted pending Undo draft');
   // A fresh keydown models a released/repressed shortcut, rather than auto-repeat.
   expect(await workspaceZ(page, { repeat: false })).toBe(false);
-  const undo = page.getByRole('button', { name: 'Undo delete', exact: true });
+  const undo = page.getByRole('button', { name: 'Undo', exact: true });
   await expect(undo).toBeDisabled();
   await undo.dispatchEvent('click');
   expect(await page.evaluate(() => (window as any).__test.undoRequests)).toBe(

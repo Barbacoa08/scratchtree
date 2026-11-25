@@ -38,6 +38,7 @@ const cases = [
   'captured-outcome-clock',
   'purged-latest-input',
   'large-reorder-intent',
+  'workspace-history',
   'keyboard-reorder-reopen',
   'keyboard-reorder-epoch',
   'keyboard-reorder-dirty-epoch',

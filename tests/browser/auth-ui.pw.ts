@@ -190,7 +190,8 @@ test('footer order, themes, focus trap, and screenshots', async ({ page }) => {
     'Trash',
     'Export backup',
     'Restore backup',
-    'Undo delete',
+    'Undo',
+    'Redo',
     'Sign in / sign up',
   ]);
   await expect(nav.locator('.auth-footer')).toHaveCSS(

@@ -7,11 +7,16 @@ import {
   type WorkspaceSnapshot,
 } from '../../src/lib/domain/notes';
 import * as items from '../../src/lib/domain/items';
+import {
+  applyCapturedHistory,
+  type HistoryRequest,
+} from '../../src/lib/domain/workspace-history';
 import type {
   DraftAck,
   CaptureItem,
   CreateChildTree,
   ReorderItem,
+  DeleteAttempt,
   PurgeRequest,
   MoveItems,
   TransitionLocation,
@@ -21,6 +26,7 @@ import type { ColorToken, Location } from '../../src/lib/domain/notes';
 import { validateBackup, backupFixture } from './backup';
 import type { BackupV8 } from '../../src/lib/sync/backup';
 export class MemoryRepository implements Repository {
+  private historyWrites = new Set<string>();
   snapshot = emptyWorkspace();
   fail: string | null = null;
   delaySave: Promise<void> | null = null;
@@ -122,7 +128,9 @@ export class MemoryRepository implements Repository {
   }
   async reorderItem(request: ReorderItem) {
     this.check('reorder');
-    return this.mutate((s) => items.reorderItem(s, request));
+    return this.track(request.attempt?.id, (s, replay) =>
+      items.reorderItem(s, request, replay),
+    );
   }
   async discardDraft(key: string) {
     this.check('discard');
@@ -130,9 +138,11 @@ export class MemoryRepository implements Repository {
       (s) => (s.drafts = s.drafts.filter((d) => d.key !== key)),
     );
   }
-  async deleteItem(id: string, leave?: Location) {
+  async deleteItem(id: string, leave?: Location, attempt?: DeleteAttempt) {
     this.check('delete');
-    return this.mutate((s) => items.deleteItem(s, id, leave));
+    return this.track(attempt?.id, (s, replay) =>
+      items.deleteItem(s, id, leave, attempt, replay),
+    );
   }
   async purgeItem(request: PurgeRequest) {
     this.check('purge');
@@ -146,7 +156,9 @@ export class MemoryRepository implements Repository {
   }
   async moveItems(request: MoveItems) {
     this.check('move');
-    return this.mutate((s) => items.moveItems(s, request));
+    return this.track(request.operationId, (s, replay) =>
+      items.moveItems(s, request, replay),
+    );
   }
   async restoreItem(id: string) {
     this.check('restore-item');
@@ -155,6 +167,22 @@ export class MemoryRepository implements Repository {
   async undoDelete(request: UndoDeleteRequest) {
     this.check('undo');
     return this.mutate((s) => items.undoDelete(s, request));
+  }
+  async applyHistory(request: HistoryRequest) {
+    this.check(request.direction);
+    return this.track(request.id, (s, replay) =>
+      applyCapturedHistory(s, request, replay),
+    );
+  }
+  private track(
+    id: string | undefined,
+    apply: (s: WorkspaceSnapshot, replay: boolean) => void,
+  ) {
+    const saved = this.mutate((s) =>
+      apply(s, id !== undefined && this.historyWrites.has(id)),
+    );
+    if (id) this.historyWrites.add(id);
+    return saved;
   }
   async exportBackup() {
     this.check('export');

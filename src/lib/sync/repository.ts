@@ -27,12 +27,18 @@ import type {
 } from '../domain/notes';
 import { emptyWorkspace, MAX_ENVELOPE } from '../domain/notes';
 import * as rules from '../domain/items';
+import {
+  applyCapturedHistory,
+  ChangedHistory,
+  type HistoryRequest,
+} from '../domain/workspace-history';
 import { composeOwner, effectiveScope } from '../domain/hierarchy';
 import type { BackupFiles } from '../platform/backup-files';
 import type {
   CaptureItem,
   CreateChildTree,
   DraftAck,
+  DeleteAttempt,
   MoveItems,
   PurgeRequest,
   ReorderItem,
@@ -59,6 +65,7 @@ import {
   digest,
   canonicalJson,
   preservePendingIntent,
+  historyOperationId,
   orderedIntents,
   readJournalMetadata,
   sourceOfIntent,
@@ -197,11 +204,15 @@ const replaced = () =>
     { code: 'library_replaced' },
   );
 const stale = () =>
-  new Error(
-    'The captured notes or library changed. Your content is retained for recovery.',
+  Object.assign(
+    new Error(
+      'The captured notes or library changed. Your content is retained for recovery.',
+    ),
+    { code: 'structure_changed' },
   );
 /** Local acknowledgment is IndexedDB durability only, never server acceptance. */
 export class DexieRepository implements Repository {
+  private lastHistoryWrite: string | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private staged: { token: string; backup: BackupV8; epoch: string } | null =
     null;
@@ -1068,7 +1079,11 @@ export class DexieRepository implements Repository {
       s.drafts = s.drafts.filter((d) => d.key !== key);
     });
   }
-  private apply(s: WorkspaceSnapshot, c: IntentCommand): string[] {
+  private apply(
+    s: WorkspaceSnapshot,
+    c: IntentCommand,
+    replay = false,
+  ): string[] {
     switch (c.kind) {
       case 'replaceLibrary':
         throw new Error('Library replacement requires a staged restore.');
@@ -1085,7 +1100,7 @@ export class DexieRepository implements Repository {
         rules.promoteItem(s, c.id);
         break;
       case 'deleteItem':
-        rules.deleteItem(s, c.id, c.leave);
+        rules.deleteItem(s, c.id, c.leave, c.attempt, replay);
         break;
       case 'purgeItem':
         return rules.purgeItem(s, c.request);
@@ -1093,10 +1108,13 @@ export class DexieRepository implements Repository {
         rules.transitionLocation(s, c.request);
         break;
       case 'moveItems':
-        rules.moveItems(s, c.request);
+        rules.moveItems(s, c.request, replay);
         break;
       case 'restoreItem':
         rules.restoreItem(s, c.id);
+        break;
+      case 'applyHistory':
+        applyCapturedHistory(s, c.request, replay);
         break;
       case 'undoDelete':
         rules.undoDelete(s, c.request);
@@ -1111,10 +1129,41 @@ export class DexieRepository implements Repository {
         rules.setItemColor(s, c.id, c.color);
         break;
       case 'reorderItem':
-        rules.reorderItem(s, c.request);
+        rules.reorderItem(s, c.request, replay);
         break;
     }
     return [];
+  }
+  private async discardRejectedHistory(
+    intent: PendingIntent | undefined,
+    error: unknown,
+  ) {
+    const rejected =
+      error instanceof ChangedHistory ||
+      (error instanceof Error &&
+        'code' in error &&
+        error.code === 'structure_changed');
+    if (
+      !intent ||
+      intent.localApplied ||
+      !historyOperationId(intent.command) ||
+      !rejected
+    )
+      return;
+    await this.db.transaction(
+      'rw',
+      [this.db.pending, this.db.witnesses],
+      async () => {
+        const current = await this.db.pending.get(intent.id);
+        if (
+          current &&
+          !current.localApplied &&
+          current.digest === intent.digest &&
+          !(await this.db.witnesses.get(intent.id))
+        )
+          await this.db.pending.delete(intent.id);
+      },
+    );
   }
   private async expected(
     before: WorkspaceSnapshot,
@@ -1316,6 +1365,12 @@ export class DexieRepository implements Repository {
       const before = await this.db.transaction('r', this.tables(), () =>
         this.read(commandEpoch),
       );
+      const fingerprint = await digest({ epoch: before.epoch, command });
+      const tracked = !!historyOperationId(command);
+      if (tracked && fingerprint === this.lastHistoryWrite) {
+        this.apply(before.snapshot, command, true);
+        return { workspace: before.snapshot, removedIds: [] };
+      }
       if (
         command.kind === 'saveItemSource' &&
         !before.snapshot.items.some((item) => item.id === command.id)
@@ -1331,14 +1386,25 @@ export class DexieRepository implements Repository {
           throw replaced();
         throw unavailable();
       }
-      const fingerprint = await digest({ epoch: before.epoch, command });
       const candidates = (
         await this.db.pending.where('fingerprint').equals(fingerprint).toArray()
       ).sort((a, b) => b.recordedAt - a.recordedAt);
-      let pending = candidates.find((x) => !x.localApplied);
+      let pending = tracked
+        ? candidates[0]
+        : candidates.find((x) => !x.localApplied);
       const useIndex = !candidates.length && canIndex(command, before.snapshot);
-      const after = copyMutation(before, useIndex),
-        removedIds = this.apply(after.snapshot, command);
+      const after = copyMutation(before, useIndex);
+      let removedIds: string[];
+      try {
+        removedIds = this.apply(
+          after.snapshot,
+          command,
+          pending?.localApplied ?? false,
+        );
+      } catch (error) {
+        await this.discardRejectedHistory(pending, error);
+        throw error;
+      }
       if (
         (command.kind === 'captureItem' &&
           before.purgedIds.includes(command.request.id)) ||
@@ -1376,6 +1442,13 @@ export class DexieRepository implements Repository {
           removedIds,
           indexed,
         );
+        if (tracked) {
+          const [start, finish] = await Promise.all([
+            digest(rules.structuralItems(before.snapshot)),
+            digest(rules.structuralItems(after.snapshot)),
+          ]);
+          expected.structure = { before: start, after: finish };
+        }
         pending = {
           id: crypto.randomUUID(),
           epoch: before.epoch,
@@ -1410,7 +1483,7 @@ export class DexieRepository implements Repository {
             await this.db.recovery.put(record);
         },
       );
-      return this.db.transaction('rw', this.tables(), async () => {
+      const commit = this.db.transaction('rw', this.tables(), async () => {
         if (
           (await this.db.libraries.get(this.libraryId))?.epoch !== intent.epoch
         )
@@ -1422,7 +1495,11 @@ export class DexieRepository implements Repository {
         const acknowledgedReplay =
           intent.localApplied &&
           this.outcomeMatches(fresh, intent.expected, intent.command);
-        const removed = this.apply(next.snapshot, intent.command);
+        const removed = this.apply(
+          next.snapshot,
+          intent.command,
+          intent.localApplied,
+        );
         if (!acknowledgedReplay) {
           const priorItems = new Map(
             fresh.snapshot.items.map((item) => [item.id, item]),
@@ -1489,6 +1566,12 @@ export class DexieRepository implements Repository {
         await this.settleLocalWrites();
         return { workspace: next.snapshot, removedIds: removed };
       });
+      const result = await commit.catch(async (error: unknown) => {
+        await this.discardRejectedHistory(intent, error);
+        throw error;
+      });
+      if (tracked) this.lastHistoryWrite = fingerprint;
+      return result;
     });
   }
   saveItemSource(id: string, markdown: string, draft: DraftAck) {
@@ -1509,11 +1592,12 @@ export class DexieRepository implements Repository {
   promoteItem(id: string) {
     return this.mutate({ kind: 'promoteItem', id }).then((x) => x.workspace);
   }
-  deleteItem(id: string, leave?: Location) {
+  deleteItem(id: string, leave?: Location, attempt?: DeleteAttempt) {
     return this.mutate({
       kind: 'deleteItem',
       id,
       ...(leave ? { leave } : {}),
+      ...(attempt ? { attempt } : {}),
     }).then((x) => x.workspace);
   }
   purgeItem(request: PurgeRequest) {
@@ -1532,6 +1616,11 @@ export class DexieRepository implements Repository {
   }
   undoDelete(request: UndoDeleteRequest) {
     return this.mutate({ kind: 'undoDelete', request }).then(
+      (x) => x.workspace,
+    );
+  }
+  applyHistory(request: HistoryRequest) {
+    return this.mutate({ kind: 'applyHistory', request }).then(
       (x) => x.workspace,
     );
   }

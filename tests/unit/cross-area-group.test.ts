@@ -383,8 +383,7 @@ it('Undo keeps an earlier lost-purge Retry visible until its exact acknowledgmen
 
 it('Undo reconciles a known lost creation acknowledgment before rejecting stale structure without duplicating its identity', async () => {
   const repo = new MemoryRepository();
-  repo.snapshot.items = [item({ id: id(1), deletedAt: 3 })];
-  repo.snapshot.undoDeleteIds = [id(1)];
+  repo.snapshot.items = [item({ id: id(1) })];
   const capture = repo.captureItem.bind(repo),
     requests: string[] = [];
   let lose = true;
@@ -399,6 +398,7 @@ it('Undo reconciles a known lost creation acknowledgment before rejecting stale 
   };
   const c = new WorkspaceController(repo);
   await c.start();
+  await c.remove(id(1));
   c.editSource('captured once\r\n');
   expect(await c.save()).toBe(false);
   const capturedId = requests[0];
@@ -417,19 +417,16 @@ it('Undo reconciles a known lost creation acknowledgment before rejecting stale 
 
 it('a failed controller Undo retries its captured IDs and cannot consume a newer deletion marker', async () => {
   const repo = new MemoryRepository();
-  repo.snapshot.items = [
-    item({ id: id(1), deletedAt: 3 }),
-    item({ id: id(2) }),
-  ];
-  repo.snapshot.undoDeleteIds = [id(1)];
-  const undo = repo.undoDelete.bind(repo),
+  repo.snapshot.items = [item({ id: id(1) }), item({ id: id(2), position: 1 })];
+  const undo = repo.applyHistory.bind(repo),
     requests: string[][] = [];
-  repo.undoDelete = async (request) => {
-    requests.push([...request.ids]);
+  repo.applyHistory = async (request) => {
+    requests.push([...request.edit.ids]);
     return undo(request);
   };
   const c = new WorkspaceController(repo);
   await c.start();
+  await c.remove(id(1));
   repo.fail = 'undo';
   expect(await c.undoRemove()).toBe(false);
   repo.fail = null;

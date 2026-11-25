@@ -105,7 +105,7 @@ describe('strict version-8 library backup', () => {
     expect(validateBackup(text)).toEqual(JSON.parse(text));
   });
 });
-it('restores exact uppercase IDs, times, source, and draft, and undoes completion-bearing deletion', async () => {
+it('restores exact uppercase IDs, times, source, and draft and keeps Trash restorable', async () => {
   const repo = new MemoryRepository(),
     c = new WorkspaceController(repo);
   try {
@@ -116,7 +116,8 @@ it('restores exact uppercase IDs, times, source, and draft, and undoes completio
     expect(repo.snapshot).toEqual(snapshot());
     await c.selectNote(id);
     expect(c.state.source).toBe('unfinished  \r\n');
-    await c.undoRemove();
+    expect(await c.undoRemove()).toBe(false);
+    expect(await c.restoreItem(deleted)).toBe(true);
     expect(repo.snapshot.items.find((x) => x.id === deleted)).toMatchObject({
       deletedAt: null,
       done: true,

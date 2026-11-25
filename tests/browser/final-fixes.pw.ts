@@ -227,8 +227,6 @@ for (const constrained of [false, true])
       .getByRole('button', { name: 'Delete note', exact: true })
       .click();
     await expect(cards(page)).toHaveCount(2);
-    await page
-      .getByRole('button', { name: 'Undo delete', exact: true })
-      .click();
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect(cards(page)).toHaveCount(3);
   });

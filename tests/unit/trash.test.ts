@@ -21,9 +21,9 @@ it('Undo while viewing restored tree follows the live scope without losing its c
     id: root,
     parent: { scope: 'live', itemId: null },
   });
-  await r.deleteItem(root);
   const c = new WorkspaceController(r);
   await c.start();
+  await c.remove(root);
   await c.openTree(root);
   c.editSource('tree draft');
   expect(await c.undoRemove()).toBe(true);
