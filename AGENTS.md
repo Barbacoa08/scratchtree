@@ -53,6 +53,8 @@ Existing-account OTP uses a private server-side allowed-email preflight on the s
 
 Use note for each content-bearing entry and note tree / tree for its hierarchy. Use parent and sibling without suffixes, and child note where needed. Root names the top navigation destination. Use library only for all stored data; otherwise say notes, Root, or editor. Write a note labels Command-N and Space; Command-N first enters a selected item. Saved fenced and indented code blocks offer Copy code without fences or line numbers. Keep the inspiration credit in the landing-page footer only.
 
+An acknowledged M move between locations shows one upper-right toast with the moved note count and the captured destination path. It preserves focus and lasts five visible seconds, paused during hover or focus. Go to tree visits the exact destination through normal navigation. Details retains the latest move until replacement or restart.
+
 ## Working process
 
 - Read [README.md](README.md), this guide, current maintenance/test guidance when present, and the active task's local status. A fresh clone must remain usable without private scratch notes.

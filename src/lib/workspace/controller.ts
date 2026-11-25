@@ -104,8 +104,18 @@ function errorMessage(error: unknown) {
     : '';
 }
 
+export interface MoveConfirmation {
+  operationId?: string;
+  destination: Location;
+  firstId: string;
+  summary: string;
+  path: string;
+  message: string;
+}
+
 export interface ViewState {
   snapshot: WorkspaceSnapshot;
+  moveConfirmation: MoveConfirmation | null;
   undoAction: HistoryAction | null;
   redoAction: HistoryAction | null;
   historyResult: { ids: string[] } | null;
@@ -135,6 +145,7 @@ export interface ViewState {
 export class WorkspaceController {
   state: ViewState = {
     snapshot: emptyWorkspace(),
+    moveConfirmation: null,
     undoAction: null,
     redoAction: null,
     historyResult: null,
@@ -423,6 +434,10 @@ export class WorkspaceController {
                     : this.state.keyboardReorderError,
                 ),
                 cacheGeneration: this.state.cacheGeneration + 1,
+                moveConfirmation: null,
+                ...(this.state.moveConfirmation?.message === this.state.status
+                  ? { status: 'Library replaced' }
+                  : {}),
                 location: { scope: 'live', itemId: null },
                 ownerId: null,
               }
@@ -1747,8 +1762,11 @@ export class WorkspaceController {
     this.groupDeleteRetries.set(retry, key);
     return retry();
   }
-  moveItems(request: MoveItems): Promise<boolean> {
+  moveItems(request: MoveItems, shownPath?: string): Promise<boolean> {
     const captured = structuredClone(request);
+    const reordered = sameLocation(captured.from, captured.to);
+    const count = captured.ids.length;
+    const summary = `Moved ${count} ${count === 1 ? 'note' : 'notes'} to`;
     return this.itemMetadata(
       'move',
       async () => {
@@ -1756,7 +1774,28 @@ export class WorkspaceController {
         this.recordMove(captured, saved);
         return saved;
       },
-      'Notes moved',
+      () => {
+        if (reordered) return { status: 'Order updated' };
+        if (!shownPath) return { status: 'Notes moved' };
+        const previous = this.state.moveConfirmation;
+        if (
+          captured.operationId &&
+          previous?.operationId === captured.operationId
+        )
+          return { status: previous.message };
+        const message = `${summary} ${shownPath}.`;
+        return {
+          status: message,
+          moveConfirmation: {
+            operationId: captured.operationId,
+            destination: captured.to,
+            firstId: captured.ids[0],
+            summary,
+            path: shownPath,
+            message,
+          },
+        };
+      },
     );
   }
   private async reconcileCreations(
@@ -1866,7 +1905,10 @@ export class WorkspaceController {
   private itemMetadata(
     operation: WorkspaceOperation,
     fn: () => Promise<WorkspaceSnapshot>,
-    status: string,
+    status:
+      | string
+      | (() => Pick<ViewState, 'status'> &
+          Partial<Pick<ViewState, 'moveConfirmation'>>),
     retry?: () => Promise<boolean>,
   ) {
     if (operation !== 'color' && this.historyBlocksStructure())
@@ -1885,13 +1927,14 @@ export class WorkspaceController {
           this.patch({ mutationRetry: true });
           return false;
         }
-        this.snapshot(await fn());
+        const saved = await fn();
+        this.snapshot(saved);
         this.reconcileScope();
         this.retryIntent = null;
         this.patch({
           mutationRetry: this.uncertainPurgeRetries.size > 0,
           error: '',
-          status,
+          ...(typeof status === 'string' ? { status } : status()),
         });
         return true;
       } catch (e) {
@@ -2225,6 +2268,7 @@ export class WorkspaceController {
           this.patch({
             query: '',
             status: 'Library restored',
+            moveConfirmation: null,
             error: '',
             completionRetry: null,
           });
