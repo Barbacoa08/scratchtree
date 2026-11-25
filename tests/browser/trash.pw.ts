@@ -50,6 +50,22 @@ async function deleteParent(p: Page, ids: string[]) {
   await trash(p).click();
   await expect(p.locator('h1')).toHaveText('Trash');
 }
+test('Trash Details explains startup and scheduled cleanup on desktop', async ({
+  page,
+}) => {
+  await page.goto('/?fixture');
+  await trash(page).click();
+  const details = page.getByRole('region', { name: 'Trash details' });
+  await expect(details).toContainText('after more than 180 days in Trash');
+  await expect(details).toContainText('while a younger descendant remains');
+  await expect(details).toContainText(
+    'Scratchtree checks Trash at startup for a library that has never been connected to sync.',
+  );
+  await expect(details).toContainText(
+    'Synced Trash is checked daily at midnight UTC when scheduled cleanup is configured.',
+  );
+});
+
 test('Trash opens retained trees with ordinary editing, capture, keyboard commands, and exact histories across restore', async ({
   page,
 }) => {
@@ -69,12 +85,6 @@ test('Trash opens retained trees with ordinary editing, capture, keyboard comman
       exact: true,
     }),
   ).toHaveCount(0);
-  await expect(
-    page.getByRole('complementary', { name: 'Note details' }),
-  ).toContainText('at least 90 days');
-  await expect(
-    page.getByRole('complementary', { name: 'Note details' }),
-  ).toContainText('Automatic permanent cleanup is not enabled yet.');
   await card(page, ids[1]).click();
   await page.keyboard.press('e');
   await page.keyboard.insertText('!');

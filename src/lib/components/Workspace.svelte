@@ -2691,10 +2691,22 @@
             <section aria-label="Trash details">
               <h2>Trash</h2>
               <p>
-                Notes are retained for at least 90 days unless you permanently
-                delete them. Delete here permanently removes the note and its
-                children, with no Undo. Automatic permanent cleanup is not
-                enabled yet.
+                Automatic cleanup permanently deletes eligible notes after more
+                than 180 days in Trash. A tree stays while a younger descendant
+                remains.
+              </p>
+              <p>
+                {#if browserBackup}
+                  Scratchtree checks Trash when the web editor opens.
+                {:else}
+                  Scratchtree checks Trash at startup for a library that has
+                  never been connected to sync. Synced Trash is checked daily at
+                  midnight UTC when scheduled cleanup is configured.
+                {/if}
+              </p>
+              <p>
+                Deleting here permanently removes the note and its children,
+                with no Undo.
               </p>
               {#if deletionRoot}{@const deleted = timestampPresentation(
                   deletionRoot.deletedAt!,
