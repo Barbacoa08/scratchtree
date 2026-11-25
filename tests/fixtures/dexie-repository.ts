@@ -87,6 +87,69 @@ export async function run(scenario: string) {
         (await db.pending.count()) === 1 && (await db.witnesses.count()) === 1,
         'durable pending and witness',
       );
+    } else if (scenario === 'workspace-history') {
+      for (const position of [1, 2, 3, 4]) await capture(position);
+      await repo.promoteItem(id(4));
+      const destination = { scope: 'live', itemId: id(4) } as const;
+      const controller = new WorkspaceController(repo);
+      await controller.start();
+      assert(
+        await controller.moveItems(
+          controller.captureMove([id(1), id(3)], destination, 0),
+        ),
+        'move the group',
+      );
+      assert(await controller.remove(id(2)), 'delete the remaining note');
+      const historyWrite = repo.applyHistory.bind(repo);
+      let lose = true;
+      repo.applyHistory = async (request) => {
+        const saved = await historyWrite(request);
+        if (lose) {
+          lose = false;
+          throw Error('Lost history acknowledgment');
+        }
+        return saved;
+      };
+      assert(
+        !(await controller.undoRemove()),
+        'lost transaction acknowledgment is exposed',
+      );
+      assert(
+        await controller.retryMutation(),
+        'retry acknowledges the exact undo',
+      );
+      assert(await controller.undoRemove(), 'undo the group move');
+      const originalOrder = (await repo.loadWorkspace()).items
+        .filter((item) => item.parentId === null && item.deletedAt === null)
+        .sort((a, b) => a.position - b.position)
+        .map((item) => item.id);
+      assert(
+        JSON.stringify(originalOrder) ===
+          JSON.stringify([id(1), id(2), id(3), id(4)]),
+        'group returns to its original gaps',
+      );
+      assert(await controller.redo(), 'reapply the move');
+      assert(await controller.redo(), 'reapply the deletion');
+      controller.dispose();
+      repo.close();
+      db = new ScratchtreeDatabase({ name });
+      repo = new DexieRepository(db, files);
+      const reopened = new WorkspaceController(repo);
+      await reopened.start();
+      assert(
+        !(await reopened.undoRemove()) && !(await reopened.redo()),
+        'history resets on reopen',
+      );
+      assert(
+        (await repo.loadWorkspace()).items.find((item) => item.id === id(2))
+          ?.deletedAt != null,
+        'redo is durable',
+      );
+      assert(
+        await reopened.restoreItem(id(2)),
+        'explicit restore remains available',
+      );
+      reopened.dispose();
     } else if (scenario === 'keyboard-reorder-reopen') {
       for (const position of [1, 2, 3, 4, 5])
         await capture(position, `# **Row ${position}**\r\n- source`);

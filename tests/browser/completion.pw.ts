@@ -116,7 +116,7 @@ test('completion failure has its own narrow retry, preserving capture and latest
   await page.getByRole('textbox', { name: 'Edit Markdown' }).press('Escape');
   await page.keyboard.press('Meta+Backspace');
   await expect(card(page)).toHaveCount(0);
-  await page.getByRole('button', { name: 'Undo delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(card(page)).toHaveClass(/done/);
   await page
     .getByRole('button', { name: 'Export backup', exact: true })

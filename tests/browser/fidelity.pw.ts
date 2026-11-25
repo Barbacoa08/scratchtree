@@ -126,7 +126,7 @@ test('selection commands edit/copy/delete only outside inputs, and copy uses exa
   );
   await page.keyboard.press('Meta+Backspace');
   await expect(cards(page)).toHaveCount(1);
-  await page.getByRole('button', { name: 'Undo delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(cards(page)).toHaveCount(2);
 });
 test('search retains an active edit outside results and inert content cannot fetch or navigate', async ({

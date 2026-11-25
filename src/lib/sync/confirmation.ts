@@ -2,6 +2,10 @@ import type { SharedItem, OrderRow, PurgeRow } from './types';
 import type { Item } from '../domain/notes';
 import { validateSnapshot } from '../domain/validation';
 import { directEntries, scopeIndex } from '../domain/hierarchy';
+import {
+  historyDestination,
+  historyMatches,
+} from '../domain/workspace-history';
 import { canonicalJson, digest, type PendingIntent } from './intents';
 import { projectLibrary } from './canonical';
 import { encodeCloudBackup } from './backup';
@@ -41,21 +45,23 @@ export function applicationFields(value: unknown): unknown {
   const { owner: _owner, realmId: _realm, ...fields } = value;
   return fields;
 }
+export function witnessMatches(p: PendingIntent, witness: unknown): boolean {
+  if (!record(witness)) return false;
+  const w = applicationFields(witness) as Record<string, unknown>;
+  return (
+    Object.keys(w).length === 4 &&
+    w.id === p.id &&
+    w.epoch === p.epoch &&
+    w.digest === p.digest &&
+    w.recordedAt === p.recordedAt
+  );
+}
 export async function classifyOutcome(
   p: PendingIntent,
   witness: unknown,
   remote: RemoteLibrary,
 ): Promise<Confirmation> {
-  if (!record(witness)) return 'unknown';
-  const w = applicationFields(witness) as Record<string, unknown>;
-  if (
-    Object.keys(w).length !== 4 ||
-    w.id !== p.id ||
-    w.epoch !== p.epoch ||
-    w.digest !== p.digest ||
-    w.recordedAt !== p.recordedAt
-  )
-    return 'unknown';
+  if (!witnessMatches(p, witness)) return 'unknown';
   const validated = validateSnapshot({
     items: remote.items,
     drafts: [],
@@ -167,6 +173,16 @@ export async function classifyOutcome(
       break;
     case 'correctivePurge':
       if (remote.epoch !== command.epoch || !purged(command.ids))
+        return 'superseded';
+      break;
+    case 'applyHistory':
+      if (
+        !historyMatches(
+          { items: remote.items, drafts: [], undoDeleteIds: [] },
+          command.request.edit,
+          historyDestination(command.request),
+        )
+      )
         return 'superseded';
       break;
     case 'undoDelete': {

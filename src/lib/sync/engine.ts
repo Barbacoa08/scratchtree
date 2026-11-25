@@ -4,8 +4,14 @@ import {
   digest,
   preservePendingIntent,
   orderedIntents,
+  historyOperationId,
   type PendingIntent,
 } from './intents';
+import { structuralItems } from '../domain/items';
+import {
+  historyDestination,
+  historyMatches,
+} from '../domain/workspace-history';
 import { liveQuery } from 'dexie';
 import type { ScratchtreeDatabase } from './database';
 import type { DexieRepository } from './repository';
@@ -13,6 +19,7 @@ import type { BackupFiles } from '../platform/backup-files';
 import type { SyncPort, SyncState } from './service-types';
 import {
   classifyOutcome,
+  witnessMatches,
   readRemoteRow,
   readRemoteOutcome,
   readRemoteLibrary,
@@ -29,6 +36,41 @@ import {
   cleanupResolvedWitness,
   recoveryChunks,
 } from './recovery';
+const MAX_STRUCTURE_RECEIPTS = 10;
+const structureDigest = (view: RemoteLibrary) =>
+  digest(structuralItems({ items: view.items, drafts: [], undoDeleteIds: [] }));
+
+/** Find a short exact chain of subsequent local structural writes. Net-neutral
+ * cycles do not need to be part of the proof of the final structure. */
+function structuralSuccessors(
+  current: PendingIntent,
+  pending: readonly PendingIntent[],
+  remote: string,
+): PendingIntent[] | undefined {
+  const after = current.expected.structure?.after;
+  if (!after) return;
+  const paths = new Map<string, PendingIntent[]>([[after, []]]);
+  for (const next of pending) {
+    const structure = next.expected.structure;
+    if (
+      !structure ||
+      next.sequence <= current.sequence ||
+      next.epoch !== current.epoch
+    )
+      continue;
+    const prior = paths.get(structure.before);
+    const known = paths.get(structure.after);
+    if (
+      prior &&
+      prior.length < MAX_STRUCTURE_RECEIPTS &&
+      (!known || prior.length + 1 < known.length)
+    )
+      paths.set(structure.after, [...prior, next]);
+  }
+  const chain = paths.get(remote);
+  if (chain?.length) return chain;
+}
+
 export interface SyncEngineOptions {
   db: ScratchtreeDatabase;
   repository: DexieRepository;
@@ -280,11 +322,75 @@ export class SyncEngine implements SyncPort {
         if (this.closed || signal.aborted) return false;
         if (!p.localApplied) continue;
         const witness = await readRemoteRow(options, 'witnesses', p.id);
-        const remote = await readRemoteOutcome(
+        let remote = await readRemoteOutcome(
           { ...options, libraryId: repository.libraryId, epoch: p.epoch },
           p,
         );
-        const result = await classifyOutcome(p, witness, remote);
+        let result = await classifyOutcome(p, witness, remote);
+        if (
+          p.expected.structure &&
+          result === 'superseded' &&
+          remote.shared &&
+          remote.epoch === p.epoch
+        ) {
+          const shape = await structureDigest(remote);
+          const path = structuralSuccessors(p, ordered, shape);
+          if (path) {
+            const proofs = await Promise.all(
+              path.map((next) => readRemoteRow(options, 'witnesses', next.id)),
+            );
+            if (path.every((next, i) => witnessMatches(next, proofs[i]))) {
+              remote = await readRemoteLibrary({
+                ...options,
+                libraryId: repository.libraryId,
+                epoch: p.epoch,
+              });
+              if (
+                remote.epoch === p.epoch &&
+                (await structureDigest(remote)) === shape
+              )
+                result = 'matching';
+              else result = await classifyOutcome(p, witness, remote);
+            } else result = 'unknown';
+          } else {
+            // An unrelated insertion can change the library digest while the
+            // exact groups owned by a later reversal still match.
+            const action =
+              p.command.kind === 'applyHistory'
+                ? p.command.request.actionId
+                : historyOperationId(p.command);
+            const view = { items: remote.items, drafts: [], undoDeleteIds: [] };
+            const paired =
+              action &&
+              ordered.findLast(
+                (next) =>
+                  next.sequence > p.sequence &&
+                  next.epoch === p.epoch &&
+                  next.command.kind === 'applyHistory' &&
+                  next.command.request.actionId === action &&
+                  historyMatches(
+                    view,
+                    next.command.request.edit,
+                    historyDestination(next.command.request),
+                  ),
+              );
+            if (paired) {
+              const pairedWitness = await readRemoteRow(
+                options,
+                'witnesses',
+                paired.id,
+              );
+              if (witnessMatches(paired, pairedWitness)) {
+                remote = await readRemoteLibrary({
+                  ...options,
+                  libraryId: repository.libraryId,
+                  epoch: p.epoch,
+                });
+                result = await classifyOutcome(paired, pairedWitness, remote);
+              } else result = 'unknown';
+            }
+          }
+        }
         if (remote.shared) {
           serverView = remote;
           this.baseline = null;

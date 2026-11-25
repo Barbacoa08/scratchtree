@@ -577,7 +577,7 @@ for (const newerSelection of [false, true])
     expect((await snapshot(page)).undoDeleteIds).toEqual([]);
   });
 
-test('current backup round trip retains one persistent group Undo action', async ({
+test('backup replacement keeps the Trash records and resets the workspace history', async ({
   page,
 }) => {
   const ids = await seed(page);
@@ -607,11 +607,16 @@ test('current backup round trip retains one persistent group Undo action', async
   await page
     .getByRole('button', { name: 'Replace library', exact: true })
     .click();
-  await capture(page).press('Escape');
-  await page.keyboard.press('Meta+z');
-  await expect(card(page, ids[0])).toHaveClass(/selected/);
+  await expect(
+    page.getByRole('button', { name: 'Undo', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Redo', exact: true }),
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Trash', exact: true }).click();
+  await expect(card(page, ids[0])).toBeVisible();
   await expect(card(page, ids[2])).toBeVisible();
-  expect((await snapshot(page)).undoDeleteIds).toEqual([]);
+  expect((await snapshot(page)).undoDeleteIds).toEqual([ids[0], ids[2]]);
 });
 
 test('pending group Undo Retry shares the shortcut and button guard and preserves newer Search focus', async ({
@@ -632,10 +637,10 @@ test('pending group Undo Retry shares the shortcut and button guard and preserve
   await expect(page.getByRole('alert')).toContainText('undo failure');
   await page.evaluate(() => {
     const t = (window as any).__test,
-      undo = t.repo.undoDelete.bind(t.repo);
+      undo = t.repo.applyHistory.bind(t.repo);
     t.repo.fail = null;
     t.undoRequests = [];
-    t.repo.undoDelete = async (request: any) => {
+    t.repo.applyHistory = async (request: any) => {
       t.undoRequests.push(structuredClone(request));
       await new Promise<void>((release) => {
         t.releaseUndo = release;
@@ -648,7 +653,7 @@ test('pending group Undo Retry shares the shortcut and button guard and preserve
     .poll(() => page.evaluate(() => (window as any).__test.undoRequests.length))
     .toBe(1);
   await expect(
-    page.getByRole('button', { name: 'Undo delete', exact: true }),
+    page.getByRole('button', { name: 'Undo', exact: true }),
   ).toBeDisabled();
   const prevented = await page
     .getByRole('region', { name: 'Note stream' })
@@ -674,5 +679,5 @@ test('pending group Undo Retry shares the shortcut and button guard and preserve
     () => (window as any).__test.undoRequests,
   );
   expect(requests).toHaveLength(1);
-  expect(requests[0].ids).toEqual([ids[0], ids[2]]);
+  expect(requests[0].edit.ids).toEqual([ids[0], ids[2]]);
 });

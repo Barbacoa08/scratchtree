@@ -66,7 +66,7 @@ for (const undoAvailable of [false, true])
       .locator('.note-card')
       .first()
       .getAttribute('data-entry-id');
-    const undo = page.getByRole('button', { name: 'Undo delete', exact: true });
+    const undo = page.getByRole('button', { name: 'Undo', exact: true });
     await expect(undo).toHaveCSS('opacity', undoAvailable ? '1' : '0.5');
     await expect(
       page.getByRole('button', { name: 'Back', exact: true }),

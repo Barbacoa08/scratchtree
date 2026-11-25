@@ -14,7 +14,10 @@ export function composeOwner(key: string): { ownerId: string | null } | null {
   return null;
 }
 /** Exact IDs and an iterative, linear walk reject dangling parents and cycles. */
-export function hierarchyIndex(items: Item[]): Map<string, Item> {
+type ParentEdge = Pick<Item, 'id' | 'parentId' | 'kind'>;
+export function hierarchyIndex<T extends ParentEdge>(
+  items: readonly T[],
+): Map<string, T> {
   const byId = new Map(items.map((s) => [s.id, s]));
   if (byId.size !== items.length) throw new Error('Duplicate note.');
   const done = new Set<string>();
@@ -46,12 +49,15 @@ export function itemLabel(item: Item): string {
   }
   return points.join('');
 }
-export function scopeIndex(items: Item[]): Map<string, 'live' | 'trash'> {
+type ScopeEdge = ParentEdge & Pick<Item, 'deletedAt'>;
+export function scopeIndex<T extends ScopeEdge>(
+  items: readonly T[],
+): Map<string, 'live' | 'trash'> {
   const index = hierarchyIndex(items),
     scopes = new Map<string, 'live' | 'trash'>();
   for (const item of items) {
-    let x: Item | undefined = item;
-    const pending: Item[] = [];
+    let x: T | undefined = item;
+    const pending: T[] = [];
     while (x && !scopes.has(x.id)) {
       pending.push(x);
       if (x.deletedAt !== null) {

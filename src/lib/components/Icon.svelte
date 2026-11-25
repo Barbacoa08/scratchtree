@@ -11,6 +11,7 @@
       | 'download'
       | 'upload'
       | 'undo'
+      | 'redo'
       | 'info'
       | 'sun'
       | 'monitor'
@@ -56,8 +57,9 @@
   {:else if name === 'trash'}<path
       d="M2 4h12M6 4V2h4v2M4 4l.7 10h6.6L12 4M6.5 6.5v5M9.5 6.5v5"
     />
-  {:else if name === 'undo'}<path
+  {:else if name === 'undo' || name === 'redo'}<path
       d="M6 2.5 2.5 5.5 6 8.5M3 5.5h6a3 3 0 0 1 0 6"
+      transform={name === 'redo' ? 'translate(16 0) scale(-1 1)' : undefined}
     />
   {:else if name === 'sun'}<circle cx="8" cy="8" r="3" /><path
       d="M8 1v1M8 14v1M1 8h1M14 8h1M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"

@@ -94,7 +94,7 @@ test('explicit delete after finish saves latest edit and Undo restores it', asyn
   await expect(page.getByRole('article', { name: 'Saved note' })).toHaveCount(
     0,
   );
-  await page.getByRole('button', { name: 'Undo delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await page.locator('.note-card .note-body').click();
   await page.keyboard.press('e');
   await expect(edit(page)).toHaveText('latest edit');

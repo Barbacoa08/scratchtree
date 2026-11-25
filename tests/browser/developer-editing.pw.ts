@@ -440,7 +440,7 @@ test('expansion uses exact note identity across filters and survives deletion/Un
   ).toHaveAttribute('aria-expanded', 'true');
   await first.locator('.note-body').click();
   await page.keyboard.press('Meta+Backspace');
-  await page.getByRole('button', { name: 'Undo delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(
     first.getByRole('button', { name: 'Collapse note', exact: true }),
   ).toHaveAttribute('aria-expanded', 'true');

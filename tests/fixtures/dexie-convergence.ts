@@ -8,6 +8,7 @@ import {
 import { ScratchtreeDatabase } from '../../src/lib/sync/database';
 import { DexieRepository } from '../../src/lib/sync/repository';
 import { SyncEngine } from '../../src/lib/sync/engine';
+import { WorkspaceController } from '../../src/lib/workspace/controller';
 import {
   cleanupResolvedWitness,
   resolveIntent,
@@ -137,7 +138,83 @@ export async function run(scenario: string) {
       draft: { key: 'compose', revision: 0 },
     });
     const epoch = await repo.getEpoch();
-    if (scenario === 'retired-export' || scenario === 'retired-marker-export') {
+    if (scenario.startsWith('history-confirmation')) {
+      const root = { scope: 'live', itemId: null } as const;
+      const template = (await db.notes.get([epoch, id]))!;
+      const synthetic = Array.from({ length: 6 }, (_, n) => ({
+        ...template,
+        id: crypto.randomUUID(),
+        markdown: String(n).padEnd(900_000, 'x'),
+      }));
+      await db.notes.bulkAdd(synthetic);
+      const unrelated = scenario.endsWith('-unrelated');
+      const controller = new WorkspaceController(repo);
+      await controller.start();
+      assert(
+        await controller.reorderItem({ id, group: root, toIndex: 1 }),
+        'first reorder saved',
+      );
+      if (!unrelated) {
+        assert(
+          await controller.reorderItem({ id, group: root, toIndex: 2 }),
+          'second reorder saved',
+        );
+        assert(await controller.undoRemove(), 'second reorder undone');
+      }
+      assert(await controller.undoRemove(), 'first reorder undone');
+      const partiallySynced = scenario.endsWith('-partial');
+      const intermediate = partiallySynced
+        ? await remoteHarness(db, repo)
+        : null;
+      assert(await controller.redo(), 'first reorder redone');
+      if (!unrelated) assert(await controller.redo(), 'second reorder redone');
+      if (unrelated)
+        await repo.captureItem({
+          id: crypto.randomUUID(),
+          location: { scope: 'live', itemId: synthetic[0].id },
+          markdown: 'Unrelated later capture',
+          draft: { key: 'compose:' + synthetic[0].id, revision: 0 },
+        });
+      const h = intermediate ?? (await remoteHarness(db, repo));
+      try {
+        await h.engine.retry();
+        if (partiallySynced) {
+          const pending = await db.pending.toArray();
+          assert(
+            pending.length === 2 &&
+              pending.every(
+                (p) =>
+                  p.command.kind === 'applyHistory' &&
+                  p.command.request.direction === 'redo',
+              ),
+            'only the unpublished redos still await a witness',
+          );
+          h.server.notes = await db.notes.toArray();
+          h.server.orders = await db.orders.toArray();
+          await h.publishWitnesses();
+        }
+        await h.engine.retry();
+        assert(
+          !(await db.pending.count()),
+          'all witnessed local history writes settle against the final Redo',
+        );
+        assert(
+          !(await db.recovery.count()),
+          'no alternate whole-library copy for a verified local inverse',
+        );
+        assert(
+          h.state.state === 'up-to-date',
+          'final full shared view matches',
+        );
+      } finally {
+        h.engine.close();
+        controller.dispose();
+      }
+      return 'ok';
+    } else if (
+      scenario === 'retired-export' ||
+      scenario === 'retired-marker-export'
+    ) {
       const template = (await db.notes.get([epoch, id]))!;
       const marked = 'last acknowledged E1'.padEnd(1024 * 1024, 'm');
       const latest = 'retired E1 rows'.padEnd(1024 * 1024, 'r');

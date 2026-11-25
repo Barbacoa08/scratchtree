@@ -275,13 +275,13 @@ test('Trash navigation failure retains its own destination and source for Retry 
   ).toBe('unsaved live source');
 });
 
-test('Undo from Trash root removes restored selection and focuses capture when empty', async ({
+test('Command-Z from Trash root removes restored selection and focuses capture when empty', async ({
   page,
 }) => {
   const ids = await seed(page);
   await deleteParent(page, ids);
   await card(page, ids[1]).click();
-  await page.getByRole('button', { name: 'Undo delete', exact: true }).click();
+  await page.keyboard.press('Meta+z');
   await expect(capture(page)).toBeFocused();
   await capture(page).press('Escape');
   await stream(page).press('e');

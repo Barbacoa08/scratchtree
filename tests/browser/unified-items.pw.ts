@@ -95,7 +95,7 @@ test('mixed deletion selects same ordinal, preserves tree tree and edit historie
   await expect(page.locator(`[data-entry-id="${ids[2]}"]`)).toHaveClass(
     /selected/,
   );
-  await page.getByRole('button', { name: 'Undo delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await middle.click();
   await page.keyboard.press('e');
   await expect(edit(page)).toHaveText('middle changed');
@@ -185,7 +185,7 @@ test('deleting the open container through global search returns Root and retains
   await page.keyboard.press('Meta+Backspace');
   await expect(page.locator('h1')).toHaveText('Root');
   await expect(capture(page)).toBeFocused();
-  await page.getByRole('button', { name: 'Undo delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await page.getByRole('searchbox').press('Escape');
   await page.locator(`[data-entry-id="${id}"]`).click();
   await page.keyboard.press('ArrowRight');

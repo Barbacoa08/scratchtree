@@ -4,6 +4,7 @@ import type {
   CaptureItem,
   CreateChildTree,
   ReorderItem,
+  DeleteAttempt,
   PurgeRequest,
   TransitionLocation,
   MoveItems,
@@ -140,26 +141,62 @@ export function promoteItem(s: WorkspaceSnapshot, id: string) {
     touch(x);
   }
 }
-export function deleteItem(s: WorkspaceSnapshot, id: string, leave?: Location) {
-  const x = find(s, id);
+export function deleteItem(
+  s: WorkspaceSnapshot,
+  id: string,
+  leave?: Location,
+  attempt?: DeleteAttempt,
+  replay = false,
+) {
+  const x = attempt ? s.items.find((item) => item.id === id) : find(s, id);
+  if (!x) throw stale();
+  const trashRoot: Location = { scope: 'trash', itemId: null };
+  if (attempt) {
+    if (!equal(deletionDescendants(s, id), attempt.descendants)) throw stale();
+    const from = directEntries(s, attempt.from).map((item) => item.id);
+    const trash = directEntries(s, trashRoot).map((item) => item.id);
+    if (replay) {
+      const expectedTrash = [...attempt.trash, id];
+      if (
+        x.parentId !== null ||
+        x.deletedAt !== attempt.deletedAt ||
+        x.restoreParentId !== attempt.from.itemId ||
+        x.restoreIndex !== attempt.before.indexOf(id) ||
+        !sameIds(
+          from,
+          attempt.before.filter((entry) => entry !== id),
+        ) ||
+        !sameIds(trash.slice(0, expectedTrash.length), expectedTrash)
+      )
+        throw stale();
+      return;
+    }
+    if (
+      attempt.from.scope !== 'live' ||
+      !sameLocation(itemLocation(s.items, id), attempt.from) ||
+      !from.includes(id) ||
+      !sameIds(from, attempt.before) ||
+      !sameIds(trash, attempt.trash)
+    )
+      throw stale();
+  }
   if (x.deletedAt !== null) return;
   if (leave) {
-    location(s, leave, true);
     if (leave.itemId === null || !subtreeIds(s, id).includes(leave.itemId))
       throw stale();
+    location(s, leave, true);
   }
   const old = directEntries(s, itemLocation(s.items, id));
   const ordinal = old.findIndex((x) => x.id === id);
   x.restoreParentId = x.parentId;
   x.restoreIndex = ordinal;
   x.parentId = null;
-  x.deletedAt = Math.max(Date.now(), x.updatedAt + 1);
-  const trash = directEntries(s, { scope: 'trash', itemId: null }).filter(
-    (y) => y.id !== id,
-  );
+  x.deletedAt = attempt?.deletedAt ?? Math.max(Date.now(), x.updatedAt + 1);
+  const trash = directEntries(s, trashRoot).filter((y) => y.id !== id);
   normalize(trash);
   x.position = trash.length;
   touch(x);
+  x.updatedAt = Math.max(x.updatedAt, x.deletedAt);
   normalize(old.filter((y) => y.id !== id));
   s.undoDeleteIds = [id];
   if (leave?.itemId && !s.items.some((x) => x.parentId === leave.itemId))
@@ -201,19 +238,45 @@ export function setItemColor(
     touch(x);
   }
 }
-export function reorderItem(s: WorkspaceSnapshot, r: ReorderItem) {
-  location(s, r.group);
-  const x = find(s, r.id),
-    actual = itemLocation(s.items, r.id);
-  if (actual.scope !== r.group.scope || actual.itemId !== r.group.itemId)
+export function reorderItem(
+  s: WorkspaceSnapshot,
+  r: ReorderItem,
+  replay = false,
+) {
+  if (!r.attempt) location(s, r.group);
+  const x = r.attempt
+    ? s.items.find((item) => item.id === r.id)
+    : find(s, r.id);
+  if (!x) throw stale();
+  const actual = itemLocation(s.items, r.id);
+  if (!sameLocation(actual, r.group)) {
+    if (r.attempt) throw stale();
     throw new Error('Notes can be reordered only within the same location.');
+  }
   const group = directEntries(s, r.group);
   if (
     !Number.isSafeInteger(r.toIndex) ||
     r.toIndex < 0 ||
     r.toIndex >= group.length
-  )
+  ) {
+    if (r.attempt) throw stale();
     throw new Error('Invalid sibling index.');
+  }
+  if (r.attempt) {
+    const expected = [...r.attempt.before];
+    if (replay) {
+      expected.splice(expected.indexOf(r.id), 1);
+      expected.splice(r.toIndex, 0, r.id);
+    }
+    if (
+      !sameIds(
+        group.map((item) => item.id),
+        expected,
+      )
+    )
+      throw stale();
+    if (replay) return;
+  }
   const index = group.findIndex((y) => y.id === r.id);
   if (index === r.toIndex) return;
   group.splice(index, 1);
@@ -227,8 +290,11 @@ const sameLocation = (a: Location, b: Location) =>
 const sameIds = (a: string[], b: string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
 const stale = () =>
-  new Error(
-    'The captured notes or destination changed. Review the action again; your content is retained.',
+  Object.assign(
+    new Error(
+      'The captured notes or destination changed. Review the action again; your content is retained.',
+    ),
+    { code: 'structure_changed' },
   );
 function uniqueIds(ids: string[]) {
   if (
@@ -261,6 +327,18 @@ export function subtreeIds(
   }
   return [...result].sort();
 }
+export function deletionDescendants(
+  s: WorkspaceSnapshot,
+  root: string,
+): DeleteAttempt['descendants'] {
+  const descendants = new Set(subtreeIds(s, root));
+  descendants.delete(root);
+  return s.items
+    .filter((item) => descendants.has(item.id))
+    .map(({ id, parentId, deletedAt }) => ({ id, parentId, deletedAt }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 export function purgeItem(s: WorkspaceSnapshot, r: PurgeRequest): string[] {
   const roots = uniqueIds('id' in r ? [r.id] : r.ids);
   const expected = uniqueIds(r.expectedSubtreeIds);
@@ -675,6 +753,7 @@ function structuralAction(
   proof: StructuralProof,
   undo: boolean,
   apply: (s: WorkspaceSnapshot) => void,
+  phase?: 'before' | 'after',
 ) {
   uniqueIds(ids);
   if (!ids.length || !proof || !Array.isArray(proof.after)) throw stale();
@@ -683,17 +762,26 @@ function structuralAction(
   apply(derived);
   if (!equal(structuralItems(derived), proof.after)) throw stale();
   if (
+    phase !== 'after' &&
     equal(structuralItems(s), proof.before) &&
     (!undo || sameIds(s.undoDeleteIds, ids))
   ) {
     apply(s);
     return;
   }
-  if (!replayMatches(s, before, derived, ids)) throw stale();
+  if (phase === 'before' || !replayMatches(s, before, derived, ids))
+    throw stale();
 }
-export function moveItems(s: WorkspaceSnapshot, r: MoveItems) {
+export function moveItems(s: WorkspaceSnapshot, r: MoveItems, replay = false) {
   if (r.proof)
-    structuralAction(s, r.ids, r.proof, false, (x) => applyMove(x, r));
+    structuralAction(
+      s,
+      r.ids,
+      r.proof,
+      false,
+      (x) => applyMove(x, r),
+      r.operationId ? (replay ? 'after' : 'before') : undefined,
+    );
   else {
     if (r.from.scope !== r.to.scope) throw stale();
     applyMove(s, r);

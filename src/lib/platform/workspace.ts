@@ -1,4 +1,5 @@
 import type { WorkspaceSnapshot, Location, ColorToken } from '../domain/notes';
+import type { HistoryRequest } from '../domain/workspace-history';
 export interface RestorePreview {
   token: string;
   notes: number;
@@ -25,6 +26,15 @@ export interface ReorderItem {
   id: string;
   group: Location;
   toIndex: number;
+  attempt?: { id: string; before: string[] };
+}
+export interface DeleteAttempt {
+  id: string;
+  from: Location;
+  before: string[];
+  trash: string[];
+  descendants: Pick<StructuralItem, 'id' | 'parentId' | 'deletedAt'>[];
+  deletedAt: number;
 }
 export interface PurgeItem {
   id: string;
@@ -62,6 +72,7 @@ export interface UndoDeleteRequest {
   proof: StructuralProof;
 }
 export interface MoveItems {
+  operationId?: string;
   proof?: StructuralProof;
   deletedAt?: number;
   ids: string[];
@@ -106,12 +117,17 @@ export interface Repository {
   captureItem(request: CaptureItem): Promise<WorkspaceSnapshot>;
   createChildTree(request: CreateChildTree): Promise<WorkspaceSnapshot>;
   promoteItem(id: string): Promise<WorkspaceSnapshot>;
-  deleteItem(id: string, leave?: Location): Promise<WorkspaceSnapshot>;
+  deleteItem(
+    id: string,
+    leave?: Location,
+    attempt?: DeleteAttempt,
+  ): Promise<WorkspaceSnapshot>;
   purgeItem(request: PurgeRequest): Promise<PurgeResult>;
   transitionLocation(request: TransitionLocation): Promise<WorkspaceSnapshot>;
   moveItems(request: MoveItems): Promise<WorkspaceSnapshot>;
   restoreItem(id: string): Promise<WorkspaceSnapshot>;
   undoDelete(request: UndoDeleteRequest): Promise<WorkspaceSnapshot>;
+  applyHistory(request: HistoryRequest): Promise<WorkspaceSnapshot>;
   setItemDone(id: string, done: boolean): Promise<WorkspaceSnapshot>;
   setItemsDone(ids: string[], done: boolean): Promise<WorkspaceSnapshot>;
   setItemColor(
