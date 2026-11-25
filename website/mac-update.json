@@ -1,10 +1,10 @@
 {
-  "version": "0.3.3",
-  "notes": "Reduces repeated note-body measurements so wide trees can open faster.",
+  "version": "0.3.4",
+  "notes": "Refreshes the macOS drag-to-Applications installer with Scratchtree artwork.",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.3/Scratchtree-0.3.3-aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaW83ZFZDaDRveEIvZU40ZmdmNEhJZmlPU01BdmJXdjY1Z2hoS1VuZHRiMDgrSG5BVHRMcUVESUNsQW9KVlJxWVdVQXNEVUEvaXh4enJYTlBqUkUrWUNsSVV6aldBeVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTMwMjAzCWZpbGU6U2NyYXRjaHRyZWUtMC4zLjMtYWFyY2g2NC5hcHAudGFyLmd6CXZlcnNpb246MC4zLjMKaEFsQnZlNm9YMDhGMnRKdVphbnFXOC8xQXcrZ2UvMm9wdUYxM3g3bmllYWp1RUpwa0Q1OVIzNzJGcS9UaldkQUhXM3ZzdjhlMWFRRE5RTjBtZ3ErQlE9PQo="
+      "url": "https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.4/Scratchtree-0.3.4-aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaW83ZFZDaDRveFBjaDFNaklWWm5lRWNxS0hKem9MOWxMeHRrUStIRUlCcmovUy82aXRMcktzaG04U1JYS0lTZXVpWVFWV0VKNDQrcVU0dVVQSEhta2tZYTN4NVVvMmdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTc1MjUwCWZpbGU6U2NyYXRjaHRyZWUtMC4zLjQtYWFyY2g2NC5hcHAudGFyLmd6CXZlcnNpb246MC4zLjQKdkVXNlBzbE9GYU41VGZpWlBIMWNNVmJweTJCT0xQZUMxUDRwekZvbFQ2Wm9ONTB1azYzZFUzYXZPU1hsZ2NUY0VKOWtOWG1xT2NxbmJtRmxlVnI2QWc9PQo="
     }
   }
 }
