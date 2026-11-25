@@ -2328,6 +2328,9 @@
           <input
             id="search"
             type="search"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
             placeholder="Search"
             bind:this={search}
             value={viewState.query}
