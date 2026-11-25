@@ -49,7 +49,7 @@ func drawRoots() {
     roots.curve(to: point(14.6, 11.7), controlPoint1: point(9.4, 8), controlPoint2: point(12.6, 8.4))
     roots.move(to: point(11.3, 8.7))
     roots.curve(to: point(12, 13.2), controlPoint1: point(11.1, 10.2), controlPoint2: point(11.7, 11.6))
-    stroke(roots, paint: color(0x00599e, opacity: 0.15))
+    stroke(roots, paint: color(0x245f9a, opacity: 0.40))
 }
 
 func drawInstruction() {
@@ -98,6 +98,13 @@ func render(scale: Int, to url: URL) throws {
     // Finder draws dark filenames over a custom picture, including in Dark appearance.
     let gradient = NSGradient(colors: [color(0xf9fafb), color(0xecf2fa), color(0xd7e4f3)])!
     gradient.draw(in: NSRect(origin: .zero, size: size), angle: 42)
+    let blueFade = NSGradient(colors: [
+        color(0x98bee7, opacity: 0.83),
+        color(0xb1cdeb, opacity: 0.64),
+        color(0xd1e2f2, opacity: 0),
+    ])!
+    let corner = NSPoint(x: 646, y: 369)
+    blueFade.draw(fromCenter: corner, radius: 0, toCenter: corner, radius: 258, options: [])
     drawRoots()
     drawInstruction()
     drawArrow()

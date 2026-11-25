@@ -47,6 +47,10 @@ Use **Export backup**, then **Download backup**, to keep a separate BackupV8 fil
 2. Open the downloaded DMG. If Finder does not open the mounted Scratchtree volume, select it under **Locations**. Drag Scratchtree to Applications, or use Command+C to copy Scratchtree from the mounted volume, open Applications with Shift+Command+A, and paste with Command+V. Replace the existing app if prompted. Your app data is stored separately from the app.
 3. Open Scratchtree from Applications. The linked DMG is Developer ID-signed and notarized. If macOS asks you to confirm that you want to open an app downloaded from the internet, click **Open**.
 
+![Scratchtree on the left and a curved arrow pointing to Applications on the right](docs/media/mac-installer.png)
+
+_Scratchtree 0.3.4 installer preview. Earlier versions use Finder's standard icon view._
+
 Save the checksum file beside the DMG and verify the Mac entry in that folder.
 
 ```sh
