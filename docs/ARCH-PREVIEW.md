@@ -38,6 +38,14 @@ GitHub Actions builds Tauri’s Debian bundle on Ubuntu 24.04 with the locked pr
 
 The runtime check uses Arch’s WebKitGTK under Xvfb and Openbox in an offline Podman container as an unprivileged user. It launches the installed desktop entry, saves and copies a synthetic Markdown note, edits it, closes the window, relaunches, and compares the exact source through the system clipboard. CI also checks package removal. The evidence artifact contains the source commit, runtime versions, logs, and a screenshot when the app reaches that step.
 
-A separate offline container uses a disposable signing key and an isolated pacman keyring. It verifies a signed repository install, rejects a missing repository signature, an untrusted signer, an unsigned package, and a signature that belongs to different package bytes. It then upgrades to the next package revision and checks a saved note and an unfinished composer draft after reopening. Both revisions use the same Scratchtree binary, so upgrades between different app builds still require packaged acceptance.
+A separate offline container uses a disposable signing key and an isolated pacman keyring. It verifies a signed repository install, rejects a missing repository signature, an untrusted signer, an unsigned package, and a signature that belongs to different package bytes. It then upgrades to the next package revision and checks a saved note and an unfinished composer draft after reopening. Both revisions in the regular smoke job use the same Scratchtree binary.
+
+To test actual release binaries, manually run the Arch Preview workflow with two releases that list their Arch packages in the shared `SHA256SUMS.txt`. This downloads the exact versioned packages from GitHub, verifies their published checksums, and uses the same disposable signing and pacman checks in a clean Arch container with both packages’ declared dependencies. The job uploads verification evidence only.
+
+```sh
+gh workflow run arch-preview.yml -f older_release=0.3.1 -f newer_release=0.3.2
+```
+
+This verifies the package upgrade and local note and draft retention. For each release, test the previous-to-new package pair. The [maintainer release checklist](RELEASING.md#verify-the-released-arch-upgrade) covers when to run this check and how to verify the signed HTTPS repository once it is live.
 
 For broader Arch desktop support beyond this experimental Preview, repeat installation and local use in a full Arch desktop VM using the same package. Check native Wayland and X11 where available, keyboard and pointer use, draft retention, backup file dialogs, and package upgrade with a retained Preview profile. The sign-in controls are present. Real-account sign-in and cross-device synchronization still require acceptance on Linux. The CI smoke covers a virtual X11 session. WebKitGTK may rely on container isolation when nested sandboxing is unavailable.

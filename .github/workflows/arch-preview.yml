@@ -2,6 +2,13 @@ name: Arch Preview
 
 on:
   workflow_dispatch:
+    inputs:
+      older_release:
+        description: Older released Arch app version for a signed upgrade check
+        type: string
+      newer_release:
+        description: Newer released Arch app version for a signed upgrade check
+        type: string
   pull_request:
     branches: [main]
     paths:
@@ -21,11 +28,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: arch-preview-${{ github.ref }}
+  group: arch-preview-${{ github.ref }}-${{ (inputs.older_release != '' || inputs.newer_release != '') && 'released' || 'build' }}-${{ inputs.older_release }}-${{ inputs.newer_release }}
   cancel-in-progress: true
 
 jobs:
   arch-preview:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.older_release == '' && inputs.newer_release == '') }}
     name: Build and smoke-test on Arch x86_64
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -139,6 +147,103 @@ jobs:
         with:
           name: scratchtree-preview-arch-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
           path: .projects/arch-preview-ci/package/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
+
+  signed-release-upgrade:
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.older_release != '' || inputs.newer_release != '') }}
+    name: Verify signed upgrade between released Arch builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ARCH_WORK: .projects/arch-release-upgrade-ci
+      OLDER_RELEASE: ${{ inputs.older_release }}
+      NEWER_RELEASE: ${{ inputs.newer_release }}
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify public release package bytes
+        run: |
+          set -euo pipefail
+          if ! [[ $OLDER_RELEASE =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $NEWER_RELEASE =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Supply both released versions as MAJOR.MINOR.PATCH.' >&2
+            exit 2
+          fi
+          mkdir -p "$ARCH_WORK"/{release,upgrade,context,evidence}
+          git rev-parse HEAD > "$ARCH_WORK/evidence/workflow-source.txt"
+          fetch_package() {
+            local version=$1 directory=$2 url checksum_entry package
+            url="https://github.com/Barbacoa08/scratchtree/releases/download/v$version"
+            curl --fail --location --silent --show-error --max-time 60 "$url/SHA256SUMS.txt" \
+              --output "$directory/SHA256SUMS.txt"
+            checksum_entry=$(awk -v version="$version" '
+              NF == 2 && index($2, "scratchtree-preview-" version "-") == 1 &&
+              $2 ~ /^[a-z0-9.-]+-x86_64[.]pkg[.]tar[.]zst$/ {
+                if (length($1) != 64 || $1 !~ /^[0-9a-f]+$/) invalid = 1
+                count++
+                entry = $1 "  " $2
+              }
+              END { if (invalid || count != 1) exit 1; print entry }
+            ' "$directory/SHA256SUMS.txt")
+            package=${checksum_entry#*  }
+            [[ $package =~ ^scratchtree-preview-[0-9]+\.[0-9]+\.[0-9]+-[1-9][0-9]*-x86_64\.pkg\.tar\.zst$ ]]
+            curl --fail --location --silent --show-error --max-time 120 "$url/$package" \
+              --output "$directory/$package"
+            (cd "$directory" && printf '%s\n' "$checksum_entry" | sha256sum -c -)
+            printf '%s  %s\n' "$url/$package" "$checksum_entry" >> "$ARCH_WORK/evidence/release-assets.txt"
+          }
+          fetch_package "$OLDER_RELEASE" "$ARCH_WORK/release"
+          fetch_package "$NEWER_RELEASE" "$ARCH_WORK/upgrade"
+
+      - name: Install tools in a clean Arch image
+        shell: bash
+        run: |
+          for package in "$ARCH_WORK"/{release,upgrade}/*.pkg.tar.zst; do
+            tar -xOf "$package" .PKGINFO || exit 1
+          done | awk -F ' = ' '$1 == "depend" {
+            name = $2
+            sub(/[<>=].*$/, "", name)
+            if (name !~ /^[a-z0-9@._+-]+$/ || name ~ /^[-.]/) exit 1
+            print name
+          }' | sort -u > "$ARCH_WORK/context/release-dependencies.txt"
+          test -s "$ARCH_WORK/context/release-dependencies.txt"
+          cp packaging/arch/{Dockerfile,PKGBUILD,stage-signed-repo.sh} \
+            tests/native/{arch-preview.sh,arch-signing.sh} "$ARCH_WORK/context/"
+          sudo podman build --pull=always \
+            --build-arg SCRATCHTREE_SMOKE_BASE=released-package-dependencies \
+            --tag scratchtree-released-arch-proof "$ARCH_WORK/context"
+          sudo podman image inspect docker.io/library/archlinux:base --format '{{.Digest}}' \
+            > "$ARCH_WORK/evidence/arch-image-digest.txt"
+
+      - name: Install and upgrade verified releases offline
+        run: |
+          set -o pipefail
+          sudo podman run --name scratchtree-released-arch-signing --network none --user root \
+            --tmpfs /proof:rw,noexec,nosuid,nodev,mode=0700 \
+            --volume "$PWD/$ARCH_WORK/release:/package:ro" \
+            --volume "$PWD/$ARCH_WORK/upgrade:/upgrade:ro" \
+            scratchtree-released-arch-proof bash /usr/local/bin/arch-signing \
+            "$OLDER_RELEASE" "$NEWER_RELEASE" 2>&1 | tee "$ARCH_WORK/evidence/signing.log"
+
+      - name: Collect release upgrade evidence
+        if: always()
+        run: |
+          if sudo podman inspect scratchtree-released-arch-signing >/dev/null 2>&1; then
+            mkdir -p "$ARCH_WORK/evidence/signed-upgrade"
+            sudo podman cp scratchtree-released-arch-signing:/home/smoke/evidence/. \
+              "$ARCH_WORK/evidence/signed-upgrade/"
+          fi
+
+      - name: Upload release upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: arch-released-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .projects/arch-release-upgrade-ci/evidence/
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 14

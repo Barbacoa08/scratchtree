@@ -62,7 +62,7 @@ Scratchtree 0.3.2 introduced in-app update checks for Mac. If you are on 0.3.1 o
 
 [Download Scratchtree v0.3.3 for Arch Linux x86_64](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.3/scratchtree-preview-0.3.3-1-x86_64.pkg.tar.zst) · [Installation and checksum verification](docs/ARCH-PREVIEW.md). The app uses Ctrl for the Command shortcuts described below. Closing the Linux window saves pending work and exits when the save succeeds.
 
-The native smoke test covers local editing and persistence under virtual X11 with Arch WebKitGTK. The signed repository smoke covers a package revision upgrade using the same app binary. Linux Wayland, native backup dialogs, upgrades between different app versions, and account synchronization remain outside the current test coverage.
+The native smoke test covers local editing and persistence under virtual X11 with Arch WebKitGTK. Separate CI runs use disposable signing keys to verify released-package upgrades and confirm that local notes and drafts survive. Linux Wayland, native backup dialogs, and account synchronization remain outside the current test coverage. [Arch CI coverage](docs/ARCH-PREVIEW.md#what-ci-verifies)
 
 ## Transfer from alpha.5
 

@@ -15,10 +15,22 @@ upgrades=(/upgrade/*.pkg.tar.zst)
 release=${releases[0]}
 upgrade=${upgrades[0]}
 base_version=$(pacman -Qp -- "$release")
-[[ $base_version =~ ^(scratchtree-preview\ [0-9]+\.[0-9]+\.[0-9]+)-([1-9][0-9]*)$ ]]
-base_revision=${BASH_REMATCH[2]}
-upgrade_version="${BASH_REMATCH[1]}-$((base_revision + 1))"
-[[ $(pacman -Qp -- "$upgrade") == "$upgrade_version" ]]
+upgrade_version=$(pacman -Qp -- "$upgrade")
+case $# in
+  0)
+    [[ $base_version =~ ^(scratchtree-preview\ [0-9]+\.[0-9]+\.[0-9]+)-([1-9][0-9]*)$ ]]
+    [[ $upgrade_version == "${BASH_REMATCH[1]}-$((${BASH_REMATCH[2]} + 1))" ]]
+    ;;
+  2)
+    if ! [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $2 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ &&
+      $base_version == "scratchtree-preview $1-"* && $upgrade_version == "scratchtree-preview $2-"* &&
+      $(vercmp "$2" "$1") == 1 ]]; then
+      echo 'The package pair must match the selected Scratchtree releases in increasing version order.' >&2
+      exit 1
+    fi
+    ;;
+  *) echo 'Supply both released app versions or neither.' >&2; exit 2 ;;
+esac
 
 work=$(mktemp -d /proof/run.XXXXXX)
 install -d -m 700 "$work/keyring" "$work/signer" "$work/cache"
@@ -84,9 +96,14 @@ run_gui() {
     xvfb-run -a -s '-screen 0 1440x960x24' bash /usr/local/bin/arch-preview "$1"
 }
 
-# Remove the release package installed for the original smoke test before the
-# strict signed transaction. Its runtime dependencies stay installed.
-pacman -R --noconfirm scratchtree-preview
+# The default CI image starts with its newly built package. The released-package
+# proof starts with only the runtime dependencies installed.
+if [[ $# == 0 ]]; then
+  [[ $(pacman -Q scratchtree-preview) == "$base_version" ]]
+  pacman -R --noconfirm scratchtree-preview
+else
+  if pacman -Q scratchtree-preview; then exit 1; fi
+fi
 [[ ! -e /usr/bin/scratchtree-preview ]]
 pacman_key=(pacman-key --gpgdir "$work/keyring")
 "${pacman_key[@]}" --init

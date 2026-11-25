@@ -187,17 +187,30 @@ For the first signed release, also replace the exact supported ad-hoc build in a
 
 ## Stage the Arch Linux x86_64 Preview
 
-Dispatch [Arch Preview](../.github/workflows/arch-preview.yml) on the verified `main` release commit. Check the selected run’s event, branch, successful conclusion, and exact head SHA. Download the successful package and smoke artifacts for that run and attempt into the release task folder. Compare the recorded source commit and tree with the Mac build’s `source-identity.txt`. If `main` advances before dispatch and there is no successful run for the selected release commit, review the new `main` source and build both installers from it before staging.
+For every app release, dispatch [Arch Preview](../.github/workflows/arch-preview.yml) on the verified `main` release commit with both release-comparison inputs blank. This builds the new package and runs the regular smoke checks. Check the selected run’s event, branch, successful conclusion, and exact head SHA. Download the successful package and smoke artifacts for that run and attempt into the release task folder. Compare the recorded source commit and tree with the Mac build’s `source-identity.txt`. If `main` advances before dispatch and there is no successful run for the selected release commit, review the new `main` source and build both installers from it before staging.
 
 Verify the package’s SHA-256 against its CI manifest and inspect the package metadata for `scratchtree-preview`, `x86_64`, and the release’s internal application version with the recipe’s Arch package revision. Review the smoke log for offline desktop launch, save and edit, and restart with exact Markdown. Check the workflow log for package installation and removal. Copy the verified `scratchtree-preview-<version>-<pkgrel>-x86_64.pkg.tar.zst` into `$release_dir/assets` and record the run URL and evidence in the release notes. Confirm that the exact source used for this build applies the Preview override with identifier `tech.barbajoe.scratchtree.preview`.
 
 Describe Arch as an experimental signed-out Preview tested on virtual X11 with Arch WebKitGTK. The initial Preview defers native backup-dialog acceptance. Report the status of that check, Wayland, upgrades, and sync in the release notes. See the [Arch Preview guide](ARCH-PREVIEW.md) for installation and test scope.
 
+### Verify the released Arch upgrade
+
+After verifying the GitHub prerelease and its public downloads, set `older_arch_release` to the previous public Arch version. If the signed repository still serves an earlier version, use that version. Set `release_label` to the new version. Both inputs use numeric application versions without a leading `v`.
+
+```sh
+gh workflow run arch-preview.yml --ref main \
+  -f older_release="$older_arch_release" -f newer_release="$release_label"
+```
+
+This checks the exact released package bytes against their published checksums. An isolated Arch x86_64 container creates a disposable signing key, enforces repository and package signatures in pacman, and verifies a saved note and unfinished draft across the upgrade under virtual X11. Check both package versions, their checksum evidence, and the successful upgrade in the uploaded results. Record the run URL and the versions in the release task notes. Retest the previous-to-new pair for each release. [Arch Preview CI evidence](ARCH-PREVIEW.md#what-ci-verifies)
+
+A failed check blocks advancing the signed repository or its update offer. While the public Preview uses manual downloads, complete this check after publication without enabling an Arch repository or feed.
+
 ### Stage a signed Arch repository snapshot
 
 Use the reviewed Arch Preview package and its verified SHA-256 from CI. Use an Arch environment with GnuPG, libarchive, pacman tools, and a dedicated signing keyring. Use a separate disposable key when testing.
 
-For the first authorized release, provision the signing key on the signing machine. [GnuPG key management](https://gnupg.org/documentation/manuals/gnupg/OpenPGP-Key-Management.html)
+Provision the signing key on the signing machine once for the first authorized repository rollout. Reuse it for subsequent releases unless you are rotating it. [GnuPG key management](https://gnupg.org/documentation/manuals/gnupg/OpenPGP-Key-Management.html)
 
 1. Create a separate GnuPG home with mode 0700. In that keyring, run `gpg --full-generate-key` interactively to create a dedicated signing key, and set its passphrase through the local prompt.
 2. Record the full primary fingerprint from `gpg --fingerprint`. Export only that public certificate with `gpg --armor --export "$release_arch_fingerprint" > scratchtree-arch.asc`. Check that the export contains one key with the matching fingerprint.
@@ -213,7 +226,15 @@ GNUPGHOME="$release_arch_keyring" bash packaging/arch/stage-signed-repo.sh \
 
 The helper checks the copied package's checksum, name, version, and architecture before signing. It verifies the detached package signature and both repository index signatures before making the completed snapshot available locally. Keep the exact package and its `.sig`, `scratchtree.db` and `scratchtree.db.sig`, and `scratchtree.files` and `scratchtree.files.sig` together. [Arch repository signing](https://man.archlinux.org/man/repo-add.8.en)
 
-Before publishing, verify the same signed install and upgrade in a clean Arch environment, using the intended public key and configuration. A public deployment needs separate authorization. Publish immutable package files and signatures before making the new indexes available. Deploy each index with its matching signature in the same snapshot, retain packages referenced by the previous index during the transition, and verify installation from the live HTTPS URL. Publish the single public key and its full fingerprint through the official Scratchtree installation instructions. During planned rotation, announce the replacement fingerprint, verify that users can install from the newly signed snapshot, and then retire the prior key. If a key is compromised, pause publishing, publish its revocation, and tell users to remove it from pacman’s trusted keys. Enable the Arch update feed only after the repository and its trust setup have passed acceptance.
+### Publish and verify a signed Arch repository update
+
+Once the signed repository is authorized, follow these steps for every update to it.
+
+1. Stage the new package and both repository indexes as described above. Sign them with the established release key and keep the previous snapshot available during the transition. Verify the signed install and upgrade in a clean Arch environment with the intended public key and repository configuration. Confirm that the [released-package upgrade check](#verify-the-released-arch-upgrade) passed for the pair.
+2. Publish immutable package files and their signatures before making the new indexes available. Deploy each index with its matching signature in the same snapshot, and retain the package files referenced by the prior indexes during the transition. On first rollout, publish the HTTPS URL, the public key, and its full fingerprint in the [official installation instructions](ARCH-PREVIEW.md#signed-repository-setup).
+3. Verify the package and index signatures from the live HTTPS URL. Test a clean install and an upgrade from the previous repository version using the documented pacman configuration. On first rollout, use the checksum-verified older package from the [released-package upgrade check](#verify-the-released-arch-upgrade) to seed the test profile before upgrading through the live repository. Record the repository URL, signer fingerprint, versions, and note and draft retention results. Publish or advance the Arch in-app offer only after the live repository check passes and the channel is authorized.
+
+During planned rotation, announce the replacement fingerprint, verify that users can install from the newly signed snapshot, and then retire the prior key. If a key is compromised, pause publishing, publish its revocation, and tell users to remove it from pacman’s trusted keys.
 
 ## Desktop update candidates
 
@@ -298,7 +319,7 @@ done
 (cd "$release_dir/public-download" && shasum -a 256 -c SHA256SUMS.txt)
 ```
 
-Confirm public metadata has `draft: false` and `prerelease: true`, the tag resolves to the exact release commit, and the public assets match the verified draft. Preserve the release URL, artifact identities, verification output, and omissions locally. If post-publication checks fail, resolve the issue within the current authorization and preserve immutable assets and tags.
+Confirm public metadata has `draft: false` and `prerelease: true`, the tag resolves to the exact release commit, and the public assets match the verified draft. Run the [released Arch upgrade check](#verify-the-released-arch-upgrade) against those verified public downloads before advancing an enabled Arch repository. Preserve the release URL, artifact identities, verification output, and omissions locally. If post-publication checks fail, resolve the issue within the current authorization and preserve immutable assets and tags.
 
 ## Website links and automatic deployment (required)
 
