@@ -28,6 +28,18 @@ test('search leads navigation and status remains accessible in details', async (
   await expect(page.getByLabel('Keyboard shortcuts')).toContainText('Space');
 });
 
+test('Search keeps typed text literal by disabling system correction', async ({
+  page,
+}) => {
+  await page.goto('/?fixture');
+  const search = page.getByRole('searchbox', { name: 'Search saved notes' });
+  await expect(search).toHaveAttribute('autocorrect', 'off');
+  await expect(search).toHaveAttribute('autocapitalize', 'none');
+  await expect(search).toHaveAttribute('spellcheck', 'false');
+  await search.pressSequentially('long');
+  await expect(search).toHaveValue('long');
+});
+
 test('narrow details exposes failed save and retry without stealing focus', async ({
   page,
 }) => {
