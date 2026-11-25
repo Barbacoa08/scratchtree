@@ -75,6 +75,19 @@ test('restore preview shows the retention policy before replacing old Trash', as
   await expect(preview).toHaveCount(0);
 });
 
+test('Trash Details explains local cleanup for the web editor', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Trash', exact: true }).click();
+  const details = page.getByRole('region', { name: 'Trash details' });
+  await expect(details).toContainText('after more than 180 days in Trash');
+  await expect(details).toContainText(
+    'Scratchtree checks Trash when the web editor opens.',
+  );
+  await expect(details).not.toContainText('Synced Trash');
+});
+
 test('an invalid import keeps the active notes', async ({ page }) => {
   await page.goto('/');
   await page
