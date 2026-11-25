@@ -216,7 +216,7 @@ gh workflow run arch-preview.yml --ref main \
 
 This checks the exact released package bytes against their published checksums. An isolated Arch x86_64 container creates a disposable signing key, enforces repository and package signatures in pacman, and verifies a saved note and unfinished draft across the upgrade under virtual X11. Check both package versions, their checksum evidence, and the successful upgrade in the uploaded results. Record the run URL and the versions in the release task notes. Retest the previous-to-new pair for each release. [Arch Preview CI evidence](ARCH-PREVIEW.md#what-ci-verifies)
 
-A failed check blocks advancing the signed repository or its update offer. While the public Preview uses manual downloads, complete this check after publication without enabling an Arch repository or feed.
+A failed check blocks advancing the signed repository or its update offer. Run it against the published GitHub downloads before updating the signed repository.
 
 ### Stage a signed Arch repository snapshot
 
@@ -240,11 +240,20 @@ The helper checks the copied package's checksum, name, version, and architecture
 
 ### Publish and verify a signed Arch repository update
 
-Once the signed repository is authorized, follow these steps for every update to it.
+The signed pacman repository is a standalone Netlify project at `https://scratchtree-arch.netlify.app`. Deploy only its static repository files. Use a draft deploy for prepublication verification, then promote that exact deploy. The Git-connected landing page and GitHub release downloads have their own paths.
 
-1. Stage the new package and both repository indexes as described above. Sign them with the established release key and keep the previous snapshot available during the transition. Verify the signed install and upgrade in a clean Arch environment with the intended public key and repository configuration. Confirm that the [released-package upgrade check](#verify-the-released-arch-upgrade) passed for the pair.
-2. Publish immutable package files and their signatures before making the new indexes available. Deploy each index with its matching signature in the same snapshot, and retain the package files referenced by the prior indexes during the transition. On first rollout, publish the HTTPS URL, the public key, and its full fingerprint in the [official installation instructions](ARCH-PREVIEW.md#signed-repository-setup).
-3. Verify the package and index signatures from the live HTTPS URL. Test a clean install and an upgrade from the previous repository version using the documented pacman configuration. On first rollout, use the checksum-verified older package from the [released-package upgrade check](#verify-the-released-arch-upgrade) to seed the test profile before upgrading through the live repository. Record the repository URL, signer fingerprint, versions, and note and draft retention results. Publish or advance the Arch in-app offer only after the live repository check passes and the channel is authorized.
+1. Stage and verify the new package and both signed indexes as described above. Under the snapshot root, place the public key at `scratchtree-arch.asc` and place the package, its detached signature, and both index/signature pairs under `arch/x86_64/`. Retain the package and signature referenced by the previous public index during the transition. Keep a root `_headers` rule with `Cache-Control: no-cache` for `/arch/*`. Confirm that the [released-package upgrade check](#verify-the-released-arch-upgrade) passed.
+2. Upload the complete snapshot to the standalone project as a [Netlify draft deploy](https://docs.netlify.com/deploy/create-deploys/). Dispatch Arch Preview with the older and newer release versions, the **draft HTTPS origin** (`https://<24-hex-deploy-id>--scratchtree-arch.netlify.app`), and the full fingerprint from the [installation guide](ARCH-PREVIEW.md#signed-repository-setup). Review the clean install and upgrade results before publishing.
+3. Record the current production deploy ID, when present, and then promote the verified draft. Repeat the same dispatch with the production origin `https://scratchtree-arch.netlify.app`. Check the package and index signatures, installed versions, and note and draft retention. Record both run URLs and the published deploy ID. If production verification fails, restore the previous verified deploy when available and stop the rollout. Restoring the deploy does not downgrade systems that already installed the new package. Publish or advance an Arch in-app offer only after the live check passes and the channel is authorized.
+
+```sh
+gh workflow run arch-preview.yml --ref main \
+  -f older_release="$older_arch_release" -f newer_release="$release_label" \
+  -f repository_origin="$arch_repository_origin" \
+  -f signer_fingerprint="$release_arch_fingerprint"
+```
+
+Keep the private signing key on the local signing machine. When the signing prompt's passphrase has been approved for storage in macOS Keychain, the local signer can reuse it while the Keychain is unlocked. CI receives only the public origin and fingerprint.
 
 During planned rotation, announce the replacement fingerprint, verify that users can install from the newly signed snapshot, and then retire the prior key. If a key is compromised, pause publishing, publish its revocation, and tell users to remove it from pacman’s trusted keys.
 

@@ -9,6 +9,12 @@ on:
       newer_release:
         description: Newer released Arch app version for a signed upgrade check
         type: string
+      repository_origin:
+        description: Optional Scratchtree Netlify origin for live pacman verification
+        type: string
+      signer_fingerprint:
+        description: Full OpenPGP fingerprint required with a live repository origin
+        type: string
   pull_request:
     branches: [main]
     paths:
@@ -16,6 +22,7 @@ on:
       - 'packaging/arch/**'
       - 'tests/native/arch-preview.sh'
       - 'tests/native/arch-signing.sh'
+      - 'tests/native/arch-live-repository.sh'
       - 'src-tauri/**'
       - 'src/**'
       - 'static/**'
@@ -28,12 +35,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: arch-preview-${{ github.ref }}-${{ (inputs.older_release != '' || inputs.newer_release != '') && 'released' || 'build' }}-${{ inputs.older_release }}-${{ inputs.newer_release }}
+  group: arch-preview-${{ github.ref }}-${{ (inputs.older_release != '' || inputs.newer_release != '' || inputs.repository_origin != '' || inputs.signer_fingerprint != '') && 'released' || 'build' }}-${{ inputs.older_release }}-${{ inputs.newer_release }}-${{ inputs.repository_origin }}
   cancel-in-progress: true
 
 jobs:
   arch-preview:
-    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.older_release == '' && inputs.newer_release == '') }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.older_release == '' && inputs.newer_release == '' && inputs.repository_origin == '' && inputs.signer_fingerprint == '') }}
     name: Build and smoke-test on Arch x86_64
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -152,7 +159,7 @@ jobs:
           retention-days: 14
 
   signed-release-upgrade:
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.older_release != '' || inputs.newer_release != '') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.older_release != '' || inputs.newer_release != '' || inputs.repository_origin != '' || inputs.signer_fingerprint != '') }}
     name: Verify signed upgrade between released Arch builds
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -160,6 +167,8 @@ jobs:
       ARCH_WORK: .projects/arch-release-upgrade-ci
       OLDER_RELEASE: ${{ inputs.older_release }}
       NEWER_RELEASE: ${{ inputs.newer_release }}
+      REPOSITORY_ORIGIN: ${{ inputs.repository_origin }}
+      SIGNER_FINGERPRINT: ${{ inputs.signer_fingerprint }}
     steps:
       - name: Check out the source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -172,6 +181,13 @@ jobs:
           if ! [[ $OLDER_RELEASE =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $NEWER_RELEASE =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo 'Supply both released versions as MAJOR.MINOR.PATCH.' >&2
             exit 2
+          fi
+          if [[ -n $REPOSITORY_ORIGIN || -n $SIGNER_FINGERPRINT ]]; then
+            if ! [[ $REPOSITORY_ORIGIN =~ ^https://([a-f0-9]{24}--)?scratchtree-arch[.]netlify[.]app$ &&
+              $SIGNER_FINGERPRINT =~ ^([A-F0-9]{40}|[A-F0-9]{64})$ ]]; then
+              echo 'Supply the Scratchtree Netlify origin and full uppercase signer fingerprint.' >&2
+              exit 2
+            fi
           fi
           mkdir -p "$ARCH_WORK"/{release,upgrade,context,evidence}
           git rev-parse HEAD > "$ARCH_WORK/evidence/workflow-source.txt"
@@ -220,6 +236,7 @@ jobs:
             > "$ARCH_WORK/evidence/arch-image-digest.txt"
 
       - name: Install and upgrade verified releases offline
+        if: inputs.repository_origin == ''
         run: |
           set -o pipefail
           sudo podman run --name scratchtree-released-arch-signing --network none --user root \
@@ -229,6 +246,21 @@ jobs:
             scratchtree-released-arch-proof bash /usr/local/bin/arch-signing \
             "$OLDER_RELEASE" "$NEWER_RELEASE" 2>&1 | tee "$ARCH_WORK/evidence/signing.log"
 
+      - name: Verify clean installation and upgrade from the HTTPS repository
+        if: inputs.repository_origin != ''
+        run: |
+          set -euo pipefail
+          for mode in clean upgrade; do
+            sudo podman run --name "scratchtree-live-arch-$mode" --user root \
+              --tmpfs /proof:rw,noexec,nosuid,nodev,mode=0700 \
+              --volume "$PWD/$ARCH_WORK/release:/package:ro" \
+              --volume "$PWD/$ARCH_WORK/upgrade:/upgrade:ro" \
+              --volume "$PWD/tests/native/arch-live-repository.sh:/arch-live-repository.sh:ro" \
+              scratchtree-released-arch-proof bash /arch-live-repository.sh \
+              "$mode" "$REPOSITORY_ORIGIN" "$SIGNER_FINGERPRINT" 2>&1 | \
+              tee "$ARCH_WORK/evidence/live-$mode.log"
+          done
+
       - name: Collect release upgrade evidence
         if: always()
         run: |
@@ -237,6 +269,14 @@ jobs:
             sudo podman cp scratchtree-released-arch-signing:/home/smoke/evidence/. \
               "$ARCH_WORK/evidence/signed-upgrade/"
           fi
+
+          for mode in clean upgrade; do
+            container="scratchtree-live-arch-$mode"
+            if sudo podman inspect "$container" >/dev/null 2>&1; then
+              mkdir -p "$ARCH_WORK/evidence/live-$mode"
+              sudo podman cp "$container:/home/smoke/evidence/." "$ARCH_WORK/evidence/live-$mode/"
+            fi
+          done
 
       - name: Upload release upgrade evidence
         if: always()

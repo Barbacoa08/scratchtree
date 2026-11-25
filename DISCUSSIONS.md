@@ -76,7 +76,7 @@ The first updater-enabled Mac release is 0.3.2. Install its notarized DMG once t
 
 ## Arch package signatures
 
-**Accepted.** Use a dedicated OpenPGP key and a pacman repository with signed packages and indexes. Provide a one-time fingerprint check and repository setup. Keep release signing private keys outside Git, CI, and release assets. Prove trusted installation, rejection paths, and saved notes and drafts across a package upgrade with disposable keys and profiles. Public repository hosting, the release signing key, and enabling the Arch update feed follow separate acceptance and authorization. [Arch setup](docs/ARCH-PREVIEW.md#signed-repository-setup) · [Signing workflow](docs/RELEASING.md#stage-a-signed-arch-repository-snapshot)
+**Accepted.** Use a dedicated OpenPGP key and a pacman repository with signed packages and indexes. Provide a one-time fingerprint check and repository setup. Keep release signing private keys outside Git, CI, and release assets. Prove trusted installation, rejection paths, and saved notes and drafts across a package upgrade with disposable keys and profiles. The signed repository is hosted as a standalone Netlify project. Pacman can update the Preview after one-time key and repository setup. Enabling the Arch in-app update feed remains a separate decision. [Arch setup](docs/ARCH-PREVIEW.md#signed-repository-setup) · [Signing workflow](docs/RELEASING.md#stage-a-signed-arch-repository-snapshot)
 
 ## Mac App Store distribution
 
