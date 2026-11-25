@@ -135,14 +135,12 @@ describe('operation-owned confirmation', () => {
     ).toBe('matching');
   });
   it('fails closed on malformed server rows or lost replies', async () => {
-    const p = await intent();
     const fetcher = async () => new Response(JSON.stringify({ id: 'bad' }));
     await expect(
       readRemoteLibrary({
         databaseUrl: 'https://example.invalid',
         token: 'private',
         libraryId: 'test',
-        epoch: p.epoch,
         fetch: fetcher,
       }),
     ).rejects.toThrow();

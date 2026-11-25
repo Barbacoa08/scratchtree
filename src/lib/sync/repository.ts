@@ -27,6 +27,7 @@ import type {
 } from '../domain/notes';
 import { emptyWorkspace, MAX_ENVELOPE } from '../domain/notes';
 import * as rules from '../domain/items';
+import { expiredTrashIds } from '../domain/trash-retention';
 import {
   applyCapturedHistory,
   ChangedHistory,
@@ -417,6 +418,7 @@ export class DexieRepository implements Repository {
     });
     const facts = new Map(undo?.facts.map((x) => [x.id, x]) ?? []),
       actual = new Map(undoFacts(snapshot).map((x) => [x.id, x]));
+    const purged = new Set(projected.purgedIds);
     snapshot.undoDeleteIds = snapshot.undoDeleteIds.filter((id) => {
       const item = actual.get(id),
         old = facts.get(id);
@@ -424,7 +426,10 @@ export class DexieRepository implements Repository {
         item?.deletedAt != null &&
         (!old ||
           (item.deletedAt === old.deletedAt &&
-            item.restoreParentId === old.restoreParentId &&
+            (item.restoreParentId === old.restoreParentId ||
+              (item.restoreParentId === null &&
+                old.restoreParentId !== null &&
+                purged.has(old.restoreParentId))) &&
             item.restoreIndex === old.restoreIndex))
       );
     });
@@ -644,7 +649,61 @@ export class DexieRepository implements Repository {
     return state;
   }
   loadWorkspace() {
-    return this.serial(async () => (await this.adoptRemote()).snapshot);
+    return this.serial(async () => {
+      const checkRetention = this.neverBound && this.boundEpoch === null;
+      const current = await this.adoptRemote();
+      if (!checkRetention) return current.snapshot;
+      try {
+        return (
+          (await this.purgeExpiredLocal(current.epoch)) ?? current.snapshot
+        );
+      } catch {
+        console.warn('Local Trash cleanup failed. It will retry on reopen.');
+        return current.snapshot;
+      }
+    });
+  }
+
+  private purgeExpiredLocal(epoch: string) {
+    return this.db.transaction('rw', this.tables(), async () => {
+      if (
+        (await readActivation(this.db)).mode !== 'local' ||
+        (await this.db.libraries.get(this.libraryId))?.epoch !== epoch ||
+        (await this.db.pending.count())
+      )
+        return;
+      const now = Date.now();
+      const shared = await this.sharedRows(epoch);
+      const beforeView = projectLibrary(
+        shared.notes,
+        shared.orders,
+        shared.purges,
+        epoch,
+      );
+      if (
+        beforeView.notices.some(
+          ({ kind }) => kind === 'orphan' || kind === 'cycle',
+        )
+      )
+        return;
+      const before = await this.read(epoch, false, beforeView);
+      const draftOwners = new Set(
+        before.snapshot.drafts.map(
+          ({ key }) => composeOwner(key)?.ownerId ?? key,
+        ),
+      );
+      const ids = expiredTrashIds(before.snapshot.items, now, draftOwners);
+      if (!ids.length) return;
+      const afterView = projectLibrary(
+        shared.notes,
+        shared.orders,
+        [...shared.purges, ...ids.map((id) => ({ id, epoch, purgedAt: now }))],
+        epoch,
+      );
+      const after = await this.read(epoch, false, afterView);
+      await this.persist(before, after, now);
+      return after.snapshot;
+    });
   }
   readBoundWorkspace(epoch: string) {
     return this.serial(() =>
@@ -1659,6 +1718,13 @@ export class DexieRepository implements Repository {
       if (text === null) return null;
       const backup = validateCloudBackup(text);
       if ('code' in backup) throw new Error(backup.message);
+      const warning =
+        this.files.restoreWarning ??
+        'This replaces the shared notes on every device. Current local work is retained for recovery.';
+      const retentionWarning = expiredTrashIds(backup.library.items, Date.now())
+        .length
+        ? ' Imported Trash older than 180 days can be permanently deleted during automatic cleanup.'
+        : '';
       const token = crypto.randomUUID();
       this.staged = {
         token,
@@ -1670,9 +1736,7 @@ export class DexieRepository implements Repository {
         notes: backup.library.items.filter((x) => x.kind === 'note').length,
         trees: backup.library.items.filter((x) => x.kind === 'tree').length,
         drafts: backup.device.drafts.length,
-        warning:
-          this.files.restoreWarning ??
-          'This replaces the shared notes on every device. Current local work is retained for recovery.',
+        warning: warning + retentionWarning,
       };
     });
   }

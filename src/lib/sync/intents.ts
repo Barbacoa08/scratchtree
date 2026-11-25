@@ -137,6 +137,10 @@ export async function digest(value: unknown): Promise<string> {
   ).join('');
 }
 
+export function libraryIdForUser(userId: string): Promise<string> {
+  return digest(['scratchtree-library', userId]);
+}
+
 /** Current-only local journal order, independent of wall clocks and UUID spelling. */
 export function orderedIntents(rows: PendingIntent[]): PendingIntent[] {
   const seen = new Set<number>();

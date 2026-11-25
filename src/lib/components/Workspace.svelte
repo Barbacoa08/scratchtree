@@ -2840,9 +2840,10 @@
           {viewState.preview.drafts}
           {viewState.preview.drafts === 1 ? 'draft' : 'drafts'}.
         </p>
-        <p>{viewState.preview.warning}</p>
+        <p id="restore-library-warning">{viewState.preview.warning}</p>
         <button
           use:focusChoice
+          aria-describedby="restore-library-warning"
           onclick={async () => {
             await controller.restore(false);
             await tick();
@@ -2850,6 +2851,7 @@
           }}
           disabled={viewState.operation !== null}>Cancel restore</button
         ><button
+          aria-describedby="restore-library-warning"
           onclick={async () => {
             if (await controller.restore(true)) {
               selectedEditingContext = null;
