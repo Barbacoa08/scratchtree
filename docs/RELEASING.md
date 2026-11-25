@@ -10,7 +10,7 @@ The Mac release identifier is `tech.barbajoe.scratchtree`. App data is stored se
 
 - Follow [CONTRIBUTING.md](../CONTRIBUTING.md), including independent reviews, verification, and source identity. Packaging is not a replacement for implementation acceptance.
 - Confirm current authorization for the private work being performed, including use of signing credentials and submission to Apple. A private candidate can be prepared and tested ahead of a publication decision. Verify publication authorization at the [publication step](#release-notes-upload-and-publication).
-- Use the README's pinned Node, pnpm, and Rust versions, macOS command-line build prerequisites, the `aarch64-apple-darwin` Rust target, Python 3 for the checks below, and authenticated GitHub CLI access to `Barbacoa08/scratchtree`. Select the toolchains in the shell before running Tauri's child commands. Do not depend on another worktree's ignored toolchain/cache paths.
+- Use the README's pinned Node, pnpm, and Rust versions, macOS command-line build prerequisites, the `aarch64-apple-darwin` Rust target, Python 3 with `venv`, and authenticated GitHub CLI access to `Barbacoa08/scratchtree`. Select the toolchains in the shell before running Tauri's child commands. Do not depend on another worktree's ignored toolchain/cache paths.
 - Start from a clean, freshly fetched, verified release commit, normally merged `origin/main`, in an isolated worktree. Record commit/tree IDs, tool versions, architecture, commands, outcomes, and omissions in a dated ignored `.projects/` task folder.
 - Never use an original third-party application profile or bundle personal notes, IndexedDB/SQLite profiles, backups, exports, private captures, credentials, or scratch directories. New installations start empty. Do not launch against an existing user profile merely to package the installer.
 - For Developer ID signing, use the authorized signing Mac with a valid **Developer ID Application** identity and its matching private key in Keychain. Select the exact identity from `security find-identity -v -p codesigning`. If the trust chain is missing its intermediate, use [Apple's Developer ID intermediate guidance](https://developer.apple.com/support/developer-id-intermediate-certificate/). Keep trust settings intact.
@@ -40,6 +40,9 @@ node --version > "$release_dir/tool-versions.txt"
 pnpm --version >> "$release_dir/tool-versions.txt"
 rustc --version >> "$release_dir/tool-versions.txt"
 cargo --version >> "$release_dir/tool-versions.txt"
+python3 --version >> "$release_dir/tool-versions.txt"
+/usr/bin/swift --version >> "$release_dir/tool-versions.txt"
+sw_vers >> "$release_dir/tool-versions.txt"
 
 pnpm install --frozen-lockfile
 release_target_dir=$(python3 -c 'import os; from pathlib import Path; print(Path(os.environ.get("CARGO_TARGET_DIR", "src-tauri/target")).resolve())')
@@ -66,12 +69,11 @@ case "$release_signing" in
 esac
 codesign --verify --deep --strict --verbose=2 "$release_app"
 codesign --display --verbose=4 --requirements - "$release_app" > "$release_dir/app-signature.txt" 2>&1
-ln -s /Applications "$release_dir/staging/Applications"
 ```
 
 `--no-sign` skips Tauri's signing step. Sign only the staged copy with the selected method. For Developer ID, verify the expected team and authority, secure timestamp, Hardened Runtime, and designated requirement. If future bundles introduce nested executable code, sign it inside out before sealing the outer app. The checked-in `tauri:build` command produces the app bundle. Ordinary `tauri:dev` and `tauri:preview` commands use the Preview override. A disposable probe requires its own authorized identity.
 
-Read `Contents/Info.plist` and confirm product name, bundle identifier, executable, and internal version against the selected source configuration. Run `lipo -archs` on that executable and require `arm64`. Record `vtool -show-build` output; do not claim an older macOS version is supported merely because the plist lists it. Record every staged bundle file's relative path and SHA-256, and inspect its complete contents, including symlinks, against the expected application resources. Never copy a running app's data directory into staging. The staging root must contain only the application and the `/Applications` symlink.
+Read `Contents/Info.plist` and confirm product name, bundle identifier, executable, and internal version against the selected source configuration. Run `lipo -archs` on that executable and require `arm64`. Record `vtool -show-build` output; do not claim an older macOS version is supported merely because the plist lists it. Record every staged bundle file's relative path and SHA-256, and inspect its complete contents, including symlinks, against the expected application resources. Never copy a running app's data directory into staging. The staging root contains only the application.
 
 Release tag and internal application version are different identities: alpha.1 and alpha.2 used internal version `0.1.0`. Read and disclose the actual values rather than silently changing source while packaging. A version/configuration change belongs in a reviewed source change before the release build.
 
@@ -85,20 +87,29 @@ If macOS requests Keychain access, identify the exact requesting build and item 
 
 ## Package and inspect the DMG
 
+The [Mac packaging script](../packaging/macos/build-dmg.py) wraps the staged app in the branded Finder layout. It renders the light artwork with a blue fade around the Root mark at both display scales. The light background keeps Finder's dark filenames readable. The script also adds the native Applications shortcut. Sign the DMG after packaging.
+
+![Finder window with Scratchtree on the left and a curved arrow pointing to Applications on the right](media/mac-installer.png)
+
+_Mounted Apple Silicon DMG from a local packaging test._
+
 ```sh
 release_label=${release_tag#v}
 release_name="Scratchtree_${release_label}_aarch64.dmg"
 release_dmg="$release_dir/assets/$release_name"
-test ! -e "$release_dmg"
-hdiutil create -volname 'Scratchtree' -fs HFS+ \
-  -srcfolder "$release_dir/staging" -format UDZO -imagekey zlib-level=9 \
-  "$release_dmg" > "$release_dir/create-dmg.log" 2>&1
+python3 -m venv "$release_dir/dmg-tools"
+dmg_python="$release_dir/dmg-tools/bin/python"
+"$dmg_python" -m pip install -r packaging/macos/requirements.txt
+"$dmg_python" packaging/macos/build-dmg.py "$release_app" "$release_dmg" \
+  > "$release_dir/create-dmg.log" 2>&1
 if [ "$release_signing" = developer-id ]; then
   codesign --sign "$release_identity" --timestamp "$release_dmg"
   codesign --verify --strict --verbose=2 "$release_dmg"
   codesign --display --verbose=4 "$release_dmg" > "$release_dir/dmg-signature.txt" 2>&1
 fi
 ```
+
+If packaging is interrupted, use `hdiutil info` to identify any volume still associated with the `.scratchtree-dmg-*` work directory beside the output. Eject that volume before retrying.
 
 ### Notarize and staple the Developer ID DMG
 
@@ -161,13 +172,14 @@ release_mounted=true
 
 The trap detaches the successfully attached image if a later check exits or is interrupted. Keep it active through inspection. Equivalent verification scripts must use a cleanup/finally guard. If detachment fails, stop, retain the mount context, and resolve it without forcing unmounts. Check the returned mount point before reading it. Verify all of the following before uploading any release assets to GitHub:
 
-1. The volume contains only the expected app, Applications shortcut, and ordinary filesystem metadata. The shortcut is a symlink to `/Applications`.
+1. The volume contains only the expected app, Applications shortcut, hidden Finder layout and background, and ordinary filesystem metadata. The shortcut is a symlink to `/Applications`.
 2. The mounted app's complete file/symlink inventory matches staging, and all file hashes equal the recorded signed manifest. Check identifier, internal version, executable, and arm64 architecture again on the mounted app.
 3. `codesign --verify --deep --strict` succeeds on the mounted application. For a Developer ID build, assessment of the mounted app must also report **Notarized Developer ID**.
 4. There are no bundled notes, profiles, databases, exports, backups, credentials, or unrelated artifacts.
 5. The image is detached successfully. Never leave a failed verification mount behind or upload after a failed check.
 
 ```sh
+"$dmg_python" tests/native/macos-dmg-layout.py "$release_mount"
 codesign --verify --deep --strict "$release_mount/Scratchtree.app"
 if [ "$release_signing" = developer-id ]; then
   spctl --assess --type execute --verbose=4 "$release_mount/Scratchtree.app"
@@ -181,7 +193,7 @@ shasum -a 256 "$release_dmg" > "$release_dir/final-dmg-sha256.txt"
 
 ### Accept the private Developer ID candidate
 
-Use an isolated Mac environment and synthetic data. Test a fresh private download of the final image and compare its SHA-256 with `final-dmg-sha256.txt` before installation. Keep normal macOS security settings and download quarantine intact. Check the Applications install and first launch. macOS may show its standard Internet download confirmation. A Gatekeeper block requiring a System Settings exception fails the Developer ID acceptance check. Keep managed-device restrictions separate from the normal launch result. [Apple's opening guidance](https://support.apple.com/en-us/102445)
+Use an isolated Mac environment and synthetic data. Test a fresh private download of the final image and compare its SHA-256 with `final-dmg-sha256.txt` before installation. Open the mounted Scratchtree volume in Finder if it does not open automatically. Check that the instruction and arrow fit, both items and their labels are legible in Light and Dark appearances, and dragging Scratchtree onto Applications copies the app. Keep normal macOS security settings and download quarantine intact. Check the first launch. macOS may show its standard Internet download confirmation. A Gatekeeper block requiring a System Settings exception fails the Developer ID acceptance check. Keep managed-device restrictions separate from the normal launch result. [Apple's opening guidance](https://support.apple.com/en-us/102445)
 
 For the first signed release, also replace the exact supported ad-hoc build in an isolated profile using the designated test account. Export a safety backup before replacement. Record the build identities and designated requirements, Keychain prompts, saved sign-in, local notes and drafts, sync, and an offline relaunch. Verify signed-to-signed update continuity on subsequent releases. Package checks alone cannot establish launch or retained account access. Keep the candidate private until applicable acceptance passes and publication is authorized.
 

@@ -44,8 +44,12 @@ Use **Export backup**, then **Download backup**, to keep a separate BackupV8 fil
 [Download Scratchtree v0.3.3 for Apple Silicon](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.3/Scratchtree_0.3.3_aarch64.dmg) · [SHA-256 checksum](https://github.com/Barbacoa08/scratchtree/releases/download/v0.3.3/SHA256SUMS.txt) · [Release notes](https://github.com/Barbacoa08/scratchtree/releases/tag/v0.3.3)
 
 1. Export a backup before updating, and quit older app copies. The older alpha.5 uses a different backup format: prepare a converted BackupV8 copy before importing it into 0.3.3. See [Transfer from alpha.5](#transfer-from-alpha5) below.
-2. Open the downloaded DMG, drag Scratchtree to Applications, and replace the existing app if prompted. Your app data is stored separately from the app.
+2. Open the downloaded DMG. If Finder does not open the mounted Scratchtree volume, select it under **Locations**. Drag Scratchtree to Applications, or use Command+C to copy Scratchtree from the mounted volume, open Applications with Shift+Command+A, and paste with Command+V. Replace the existing app if prompted. Your app data is stored separately from the app.
 3. Open Scratchtree from Applications. The linked DMG is Developer ID-signed and notarized. If macOS asks you to confirm that you want to open an app downloaded from the internet, click **Open**.
+
+![Scratchtree on the left and a curved arrow pointing to Applications on the right](docs/media/mac-installer.png)
+
+_Scratchtree 0.3.4 installer preview. Earlier versions use Finder's standard icon view._
 
 Save the checksum file beside the DMG and verify the Mac entry in that folder.
 
