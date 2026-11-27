@@ -38,20 +38,20 @@ for (const [name, source] of [
     }, source);
     await page.locator('.note-body').click();
     await page.getByRole('button', { name: 'Edit note', exact: true }).click();
-    await editor(page).press('Meta+a');
-    await editor(page).press('Meta+c');
+    await editor(page).press('ControlOrMeta+a');
+    await editor(page).press('ControlOrMeta+c');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       source,
     );
     await editor(page).focus();
-    await editor(page).press('Meta+Home');
+    await editor(page).press('ControlOrMeta+Home');
     await editor(page).press('End');
     await editor(page).press('x');
     const edited = source.replace('line 1', 'line 1x');
     await expect.poll(() => current(page)).toBe(edited);
-    await editor(page).press('Meta+z');
+    await editor(page).press('ControlOrMeta+z');
     await expect.poll(() => current(page)).toBe(source);
-    await editor(page).press('Meta+Shift+z');
+    await editor(page).press('ControlOrMeta+Shift+Z');
     await expect.poll(() => current(page)).toBe(edited);
     await page.getByRole('region', { name: 'Note stream' }).focus();
     await page.keyboard.press('Space');
@@ -60,10 +60,10 @@ for (const [name, source] of [
     await expect
       .poll(() => current(page))
       .toBe(source.replace('line 1', 'line 1xy'));
-    await editor(page).press('Meta+z');
+    await editor(page).press('ControlOrMeta+z');
     await expect.poll(() => current(page)).toBe(edited);
-    await editor(page).press('Meta+a');
-    await editor(page).press('Meta+c');
+    await editor(page).press('ControlOrMeta+a');
+    await editor(page).press('ControlOrMeta+c');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       edited,
     );
@@ -77,21 +77,21 @@ for (const [name, source] of [
       ),
     ).toBe(edited);
     await page.getByRole('button', { name: 'Edit note', exact: true }).click();
-    await editor(page).press('Meta+Home');
+    await editor(page).press('ControlOrMeta+Home');
     await editor(page).press('End');
     await editor(page).press('Shift+Enter');
     const separator = name === 'LF' ? '\n' : '\r\n';
     const inserted = edited.replace('line 1x', 'line 1x' + separator);
     await expect.poll(() => current(page)).toBe(inserted);
-    await editor(page).press('Meta+z');
+    await editor(page).press('ControlOrMeta+z');
     await expect.poll(() => current(page)).toBe(edited);
-    await editor(page).press('Meta+Shift+z');
+    await editor(page).press('ControlOrMeta+Shift+Z');
     await expect.poll(() => current(page)).toBe(inserted);
     await editor(page).press('Backspace');
     await expect.poll(() => current(page)).toBe(edited);
-    await editor(page).press('Meta+z');
+    await editor(page).press('ControlOrMeta+z');
     await expect.poll(() => current(page)).toBe(inserted);
-    await editor(page).press('Meta+Shift+z');
+    await editor(page).press('ControlOrMeta+Shift+Z');
     await expect.poll(() => current(page)).toBe(edited);
   });
 test('raw mixed clipboard payload keeps separators when available before normalization', async ({
