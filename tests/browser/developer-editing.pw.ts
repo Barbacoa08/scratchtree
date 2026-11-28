@@ -40,7 +40,7 @@ for (const mode of ['capture', 'inline'] as const) {
       await expect(saveButton).toHaveAttribute('title', 'Save note (Enter)');
       await editor.fill('```js\nconst x = 1;\n```');
     }
-    await editor.press('Meta+Home');
+    await editor.press('ControlOrMeta+Home');
     await editor.press('ArrowDown');
     await editor.press('End');
     const hint =
@@ -50,22 +50,22 @@ for (const mode of ['capture', 'inline'] as const) {
     await expect(hint).toContainText('Enter adds a code line');
     if (mode === 'capture')
       await expect(saveButton).toHaveAttribute('title', 'Save note');
-    for (const key of ['Enter', 'Shift+Enter', 'Meta+Enter']) {
+    for (const key of ['Enter', 'Shift+Enter', 'ControlOrMeta+Enter']) {
       await editor.press(key);
       await expect(editor).toBeFocused();
       await expect(editor.locator('.cm-line')).toHaveCount(
-        4 + ['Enter', 'Shift+Enter', 'Meta+Enter'].indexOf(key),
+        4 + ['Enter', 'Shift+Enter', 'ControlOrMeta+Enter'].indexOf(key),
       );
     }
-    await editor.press('Meta+z');
-    await editor.press('Meta+z');
-    await editor.press('Meta+z');
+    await editor.press('ControlOrMeta+z');
+    await editor.press('ControlOrMeta+z');
+    await editor.press('ControlOrMeta+z');
     await expect(editor).toHaveText('```jsconst x = 1;```');
     if (mode === 'inline')
       await page.screenshot({
         path: 'test-results/captures/developer-editing/task-2-code-wide.png',
       });
-    await editor.press('Meta+End');
+    await editor.press('ControlOrMeta+End');
     await editor.press('Enter');
     await expect(editor).toBeFocused();
     await expect(hint).toContainText(
@@ -484,7 +484,7 @@ for (const mode of ['capture', 'inline'] as const)
     const editor = mode === 'inline' ? inline(page) : capture(page);
     const source = 'before\n> ```js\n> x\n> ```\nafter';
     if (mode === 'capture') await editor.fill(source);
-    await editor.press('Meta+Home');
+    await editor.press('ControlOrMeta+Home');
     const hint =
       mode === 'capture'
         ? page.locator('.composer .hint')
@@ -507,7 +507,7 @@ for (const mode of ['capture', 'inline'] as const)
     );
     expect(prevented).toBe(false);
     await expect(editor).toBeFocused();
-    await editor.press('Meta+a');
+    await editor.press('ControlOrMeta+a');
     await editor.press('Enter');
     await expect(editor).toBeFocused();
     expect(
@@ -518,7 +518,7 @@ for (const mode of ['capture', 'inline'] as const)
           ).length,
       ),
     ).toBe(mode === 'capture' ? 0 : 1);
-    await editor.press('Meta+z');
+    await editor.press('ControlOrMeta+z');
     await expect
       .poll(() =>
         page.evaluate((mode) => {
